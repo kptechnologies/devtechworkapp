@@ -9,10 +9,11 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#534AB7">
+<meta name="theme-color" content="#306090">
 <meta name="csrf" content="<?= htmlspecialchars($_SESSION['csrf']) ?>">
 <title><?= $name ?></title>
-<link rel="icon" href="<?= $v('assets/icon.svg') ?>" type="image/svg+xml">
+<link rel="icon" href="<?= $v('assets/logo-mark.png') ?>" type="image/png">
+<link rel="apple-touch-icon" href="<?= $v('assets/logo-mark.png') ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">

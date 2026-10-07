@@ -3,6 +3,8 @@
 return [
     'app_name' => 'DevTech Staff Portal',
     'company'  => 'DevTech Hub Ventures',
+    'address'  => 'Ikechy Plaza, Plot 947 Corridor Layout, Shop 17/18 Monaque Junction, Enugu State',
+    'domain'   => 'devtech.ng',
     'base_url' => '',              // e.g. https://portal.example.com (used in email links)
     'timezone' => 'Africa/Lagos',
     'currency' => '₦',
@@ -24,7 +26,7 @@ return [
         'secure'     => 'ssl',     // ssl | tls | none
         'user'       => '',
         'pass'       => '',
-        'from_email' => '',
+        'from_email' => '',        // e.g. portal@devtech.ng
         'from_name'  => 'DevTech Staff Portal',
     ],
 

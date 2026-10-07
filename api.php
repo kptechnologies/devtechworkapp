@@ -53,11 +53,19 @@ try {
 
 /* ---------------------------------------------------------------- auth */
 
-function public_config(array $me): array
+function brand_config(): array
 {
     return [
-        'app_name'      => cfg('app_name'),
-        'company'       => cfg('company'),
+        'app_name' => cfg('app_name'),
+        'company'  => setting('company_name') ?: cfg('company'),
+        'address'  => setting('company_address') ?: cfg('address', ''),
+        'domain'   => cfg('domain', ''),
+    ];
+}
+
+function public_config(array $me): array
+{
+    return brand_config() + [
         'currency'      => cfg('currency', '₦'),
         'today'         => today(),
         'poll'          => (int)cfg('poll_seconds', 10),
@@ -77,7 +85,7 @@ function act_session(array $in, ?array $me): void
         'ok'     => true,
         'csrf'   => $_SESSION['csrf'],
         'user'   => $me,
-        'config' => $me ? public_config($me) : ['app_name' => cfg('app_name'), 'company' => cfg('company')],
+        'config' => $me ? public_config($me) : brand_config(),
     ]);
 }
 

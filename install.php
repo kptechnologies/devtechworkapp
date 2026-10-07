@@ -36,6 +36,7 @@ $detectedBase = (((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? '
 $v = array_merge([
     'db_host' => 'localhost', 'db_port' => '3306', 'db_name' => '', 'db_user' => '', 'db_pass' => '',
     'app_name' => 'DevTech Staff Portal', 'company' => 'DevTech Hub Ventures', 'base_url' => $detectedBase,
+    'address' => 'Ikechy Plaza, Plot 947 Corridor Layout, Shop 17/18 Monaque Junction, Enugu State',
     'admin_name' => '', 'admin_email' => '', 'admin_pass' => '',
 ], array_map(fn($x) => is_string($x) ? trim($x) : $x, $_POST));
 
@@ -58,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sample = require __DIR__ . '/config.sample.php';
             $sample['app_name'] = $v['app_name'];
             $sample['company'] = $v['company'];
+            $sample['address'] = $v['address'];
             $sample['base_url'] = rtrim($v['base_url'], '/');
             $sample['db'] = ['host' => $v['db_host'], 'port' => (int)$v['db_port'], 'name' => $v['db_name'], 'user' => $v['db_user'], 'pass' => $v['db_pass']];
             $sample['smtp']['from_name'] = $v['app_name'];
@@ -98,6 +100,7 @@ $err
 <fieldset><legend>App</legend>
 <label>App name<input name="app_name" value="{$e('app_name')}" required></label>
 <label>Company<input name="company" value="{$e('company')}" required></label>
+<label>Company address<input name="address" value="{$e('address')}"></label>
 <label>Site address (for email links)<input name="base_url" value="{$e('base_url')}"></label>
 </fieldset>
 <fieldset><legend>First admin account</legend>
@@ -115,5 +118,5 @@ function page(string $body): void
 <style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:#F4F2FD;color:#1f1d2b;margin:0;padding:24px 16px}main{max-width:560px;margin:0 auto;background:#fff;border-radius:14px;padding:24px;border:1px solid #e4e1f5}
 h1{font-size:22px;margin:0 0 8px}fieldset{border:1px solid #e4e1f5;border-radius:10px;margin:14px 0;padding:12px 14px}legend{font-weight:600;padding:0 6px}label{display:block;font-size:13px;color:#555;margin:8px 0}
 input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px;border:1px solid #d6d3ea;border-radius:8px;font-size:15px}.btn{display:inline-block;background:#534AB7;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;text-decoration:none;cursor:pointer}
-.err{background:#FCEBEB;color:#791F1F;border-radius:8px;padding:10px 12px;margin:10px 0}.muted{color:#666;font-size:14px}code{background:#f1effa;padding:1px 5px;border-radius:4px}</style></head><body><main>' . $body . '</main></body></html>';
+.err{background:#FCEBEB;color:#791F1F;border-radius:8px;padding:10px 12px;margin:10px 0}.muted{color:#666;font-size:14px}code{background:#f1effa;padding:1px 5px;border-radius:4px}</style></head><body><main><img src="assets/logo.png" alt="DevTech" height="44" style="display:block;margin-bottom:14px">' . $body . '</main></body></html>';
 }

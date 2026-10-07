@@ -365,20 +365,19 @@
     $('#app').innerHTML = `
       <div class="login-wrap">
         <div class="login-art">
-          <div class="brand" style="border:0;padding:0"><div class="brand-mark" style="background:rgba(255,255,255,.18);color:#fff">D</div>
-            <div><div class="brand-name">${esc(App.cfg?.company || 'DevTech')}</div><div style="opacity:.8;font-size:12px">${name}</div></div></div>
+          <div><img src="assets/logo.png" alt="${esc(App.cfg?.company || 'DevTech')}" class="login-logo"><div class="brand-name" style="margin-top:10px">${esc(App.cfg?.company || 'DevTech')}</div><div style="opacity:.8;font-size:12px">${name}</div></div>
           <div><h1>Daily reports, allowances and expenses in one place.</h1>
             <div class="feats">
               <div class="feat"><i class="ti ti-wallet"></i> Live wallet balance as you spend</div>
               <div class="feat"><i class="ti ti-camera"></i> Snap receipts and work photos</div>
               <div class="feat"><i class="ti ti-clipboard-check"></i> Submit your daily report in minutes</div>
             </div></div>
-          <div style="opacity:.7;font-size:12px">© ${new Date().getFullYear()} ${esc(App.cfg?.company || '')}</div>
+          <div style="opacity:.8;font-size:12px;line-height:1.6"><i class="ti ti-map-pin" style="font-size:14px"></i> ${esc(App.cfg?.address || '')}<br>© ${new Date().getFullYear()} ${esc(App.cfg?.company || '')}${App.cfg?.domain ? ' · ' + esc(App.cfg.domain) : ''}</div>
         </div>
         <div class="login-form"><form class="login-card" id="login-form" novalidate>
           <h1 style="margin-bottom:4px">Sign in</h1><p class="muted" style="margin-bottom:20px">Use the email your admin set up for you.</p>
           ${msg ? `<div class="note-box warn" style="margin-bottom:14px">${esc(msg)}</div>` : ''}
-          <div class="field"><label for="lg-email">Email</label><input type="email" id="lg-email" name="email" autocomplete="username" placeholder="name@company.com" required autofocus></div>
+          <div class="field"><label for="lg-email">Email</label><input type="email" id="lg-email" name="email" autocomplete="username" placeholder="name@devtech.ng" required autofocus></div>
           <div class="field"><label for="lg-pass">Password</label><input type="password" id="lg-pass" name="password" autocomplete="current-password" required></div>
           <div class="err small bad hide" id="lg-err" style="margin-bottom:10px"></div>
           <button class="btn primary block" type="submit" style="height:44px">Sign in</button>
@@ -440,7 +439,7 @@
     $('#app').innerHTML = `
       <div class="shell">
         <aside class="sidebar">
-          <div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">${esc(App.cfg.company)}</div><div class="brand-sub">${esc(App.cfg.app_name)}</div></div></div>
+          <div class="brand"><img src="assets/logo.png" class="brand-logo" alt="${esc(App.cfg.company)}"><div style="min-width:0"><div class="brand-name">${esc(App.cfg.company)}</div><div class="brand-sub">Staff portal</div></div></div>
           <nav class="nav">${items.filter((i) => !i.mobileOnly).map((i) => i.label ? `<div class="nav-label">${esc(i.label)}</div>`
             : `<a href="#/${i.href}" data-nav="${i.href}"><i class="ti ti-${i.icon}"></i>${esc(i.text)}${i.badge ? `<span class="badge hide" data-badge="${i.badge}"></span>` : ''}</a>`).join('')}</nav>
           <div class="sidebar-foot">
@@ -450,7 +449,7 @@
         </aside>
         <div class="main">
           <header class="topbar">
-            <div class="brand-mark mobile-only" style="width:30px;height:30px;font-size:14px">D</div>
+            <img src="assets/logo-mark.png" class="mobile-only" alt="" style="width:32px;height:32px;border-radius:50%">
             <div class="title" id="page-title"></div>
             <div class="spacer"></div>
             <span class="live" id="live-dot" title="Balances update automatically">Live</span>

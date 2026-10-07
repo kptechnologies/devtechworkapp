@@ -148,10 +148,10 @@ function act_user_save(array $in, array $me): void
     }
     if (!empty($in['send_welcome']) && $pass !== '') {
         $url = rtrim((string)cfg('base_url'), '/');
-        queue_mail($email, $name, 'Your ' . cfg('app_name') . ' account',
-            '<div style="font-family:Arial,sans-serif;font-size:14px"><p>Hi ' . htmlspecialchars($name) . ',</p><p>Your staff portal account is ready.</p>'
+        queue_mail($email, $name, 'Your ' . cfg('app_name') . ' account', email_layout(
+            '<p>Hi ' . htmlspecialchars($name) . ',</p><p>Your staff portal account is ready.</p>'
             . '<p>Sign in: <a href="' . htmlspecialchars($url) . '">' . htmlspecialchars($url ?: 'the portal') . '</a><br>Email: <b>' . htmlspecialchars($email) . '</b><br>'
-            . 'Password: <b>' . htmlspecialchars($pass) . '</b></p><p>Change your password after your first sign-in (Profile → Change password).</p></div>');
+            . 'Password: <b>' . htmlspecialchars($pass) . '</b></p><p>Change your password after your first sign-in (Profile → Change password).</p>'));
     }
     touch_change();
     json_out(['ok' => true, 'id' => $id]);
@@ -165,6 +165,8 @@ function act_settings_get(array $in, array $me): void
     $smtp = setting('smtp') ?: [];
     $smtp['pass'] = !empty($smtp['pass']) ? '••••••••' : '';
     json_out(['ok' => true, 'settings' => [
+        'company_name' => setting('company_name') ?: cfg('company'),
+        'company_address' => setting('company_address') ?: cfg('address', ''),
         'locations' => setting('locations'),
         'expense_categories' => setting('expense_categories'),
         'credit_types' => setting('credit_types'),
@@ -185,6 +187,16 @@ function act_settings_save(array $in, array $me): void
             }
             save_setting($k, $vals);
         }
+    }
+    if (isset($in['company_name'])) {
+        $name = str_in($in['company_name'], 120);
+        if ($name === '') {
+            fail('Enter the company name.');
+        }
+        save_setting('company_name', $name);
+    }
+    if (isset($in['company_address'])) {
+        save_setting('company_address', str_in($in['company_address'], 300));
     }
     if (isset($in['daily_allowance_default'])) {
         save_setting('daily_allowance_default', money_in($in['daily_allowance_default']));
@@ -211,7 +223,7 @@ function act_smtp_test(array $in, array $me): void
 {
     require_admin();
     try {
-        send_mail($me['email'], $me['name'], 'Test email from ' . cfg('app_name'), '<p>Email notifications are working.</p>');
+        send_mail($me['email'], $me['name'], 'Test email from ' . cfg('app_name'), email_layout('<p>Email notifications are working.</p>'));
         json_out(['ok' => true, 'message' => 'Test email sent to ' . $me['email']]);
     } catch (Throwable $e) {
         fail('Email failed: ' . $e->getMessage());

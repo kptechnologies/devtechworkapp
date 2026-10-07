@@ -16,15 +16,28 @@ function notify(array $userIds, string $type, string $title, string $body = '', 
         $in = implode(',', array_fill(0, count($userIds), '?'));
         foreach (q("SELECT name, email FROM users WHERE active = 1 AND id IN ($in)", array_values($userIds))->fetchAll() as $u) {
             $url = rtrim((string)cfg('base_url'), '/') . '/' . ($link ? '#' . ltrim($link, '#') : '');
-            $html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">'
-                . '<p>Hi ' . htmlspecialchars($u['name']) . ',</p>'
+            $html = email_layout('<p>Hi ' . htmlspecialchars($u['name']) . ',</p>'
                 . '<p style="font-size:16px"><b>' . htmlspecialchars($title) . '</b></p>'
                 . ($body ? '<p>' . nl2br(htmlspecialchars($body)) . '</p>' : '')
-                . (cfg('base_url') ? '<p><a href="' . htmlspecialchars($url) . '" style="background:#534AB7;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none">Open portal</a></p>' : '')
-                . '<p style="color:#888;font-size:12px">' . htmlspecialchars((string)cfg('company')) . '</p></div>';
+                . (cfg('base_url') ? '<p><a href="' . htmlspecialchars($url) . '" style="background:#306090;color:#fff;padding:9px 16px;border-radius:6px;text-decoration:none;display:inline-block">Open portal</a></p>' : ''));
             queue_mail($u['email'], $u['name'], $title, $html);
         }
     }
+}
+
+/** Branded wrapper: logo header, message, company address footer. */
+function email_layout(string $inner): string
+{
+    $company = htmlspecialchars((string)(setting('company_name') ?: cfg('company')));
+    $address = htmlspecialchars((string)(setting('company_address') ?: cfg('address', '')));
+    $base = rtrim((string)cfg('base_url'), '/');
+    $logo = $base ? '<img src="' . htmlspecialchars($base) . '/assets/logo.png" alt="' . $company . '" height="44" style="display:block;border:0">' : '<b style="color:#306090">' . $company . '</b>';
+    return '<div style="background:#f3f5f9;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden">'
+        . '<tr><td style="padding:18px 24px;border-bottom:3px solid #306090">' . $logo . '</td></tr>'
+        . '<tr><td style="padding:22px 24px;font-size:14px;line-height:1.55;color:#222">' . $inner . '</td></tr>'
+        . '<tr><td style="padding:14px 24px;background:#f8f9fb;font-size:12px;line-height:1.5;color:#777"><b style="color:#306090">' . $company . '</b><br>' . $address . '</td></tr>'
+        . '</table></div>';
 }
 
 /** Emails are sent after the HTTP response is flushed so the UI stays fast. */

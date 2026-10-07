@@ -190,7 +190,7 @@
       const el = App.modal(isNew ? 'Add staff' : `Edit ${esc(u.name)}`, `
         <form id="us-form" novalidate>
           <div class="form-row"><div class="field"><label for="us-n">Full name <span class="req">*</span></label><input id="us-n" name="name" value="${esc(u.name)}" autofocus></div>
-            <div class="field"><label for="us-e">Email <span class="req">*</span></label><input type="email" id="us-e" name="email" value="${esc(u.email)}" placeholder="name@company.com"></div></div>
+            <div class="field"><label for="us-e">Email <span class="req">*</span></label><input type="email" id="us-e" name="email" value="${esc(u.email)}" placeholder="name@devtech.ng"></div></div>
           <div class="form-row"><div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
             <div class="field"><label for="us-l">Assigned school / location</label><select id="us-l" name="location">${App.opts(App.cfg.locations.concat(u.location && !App.cfg.locations.includes(u.location) ? [u.location] : []), u.location, { placeholder: 'None' })}</select></div></div>
           <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
@@ -300,6 +300,11 @@
     const sm = s.smtp || {};
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Settings</h1></div></div>
+      <form class="card card-pad" id="se-co" style="margin-bottom:14px"><div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
+        <img src="assets/logo.png" alt="" class="login-logo" style="height:48px;border:1px solid var(--border)"><div><h3>Company</h3><p class="muted small">Shown on the sign-in page, emails and the sidebar.</p></div></div>
+        <div class="form-row"><div class="field"><label for="se-cn">Company name</label><input id="se-cn" name="company_name" value="${esc(s.company_name || '')}"></div>
+          <div class="field"><label for="se-ca">Address</label><input id="se-ca" name="company_address" value="${esc(s.company_address || '')}"></div></div>
+        <button class="btn primary" type="submit">Save company details</button></form>
       <div class="grid g2">
         <form class="card card-pad" id="se-lists"><h3 style="margin-bottom:14px">Lists</h3>
           ${list('locations', 'Schools / locations', 'One per line. Used in reports and staff profiles.')}
@@ -310,15 +315,26 @@
         <form class="card card-pad" id="se-smtp"><h3 style="margin-bottom:4px">Email notifications</h3>
           <p class="muted small" style="margin-bottom:14px">Use an email account from cPanel → Email Accounts → Connect Devices for these details.</p>
           <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="enabled" ${sm.enabled ? 'checked' : ''}><span>Send email notifications</span></label>
-          <div class="form-row"><div class="field"><label>SMTP host</label><input name="host" value="${esc(sm.host || '')}" placeholder="mail.yourdomain.com"></div>
+          <div class="form-row"><div class="field"><label>SMTP host</label><input name="host" value="${esc(sm.host || '')}" placeholder="mail.devtech.ng"></div>
             <div class="field"><label>Port</label><input type="number" name="port" value="${esc(sm.port || 465)}"></div></div>
           <div class="form-row"><div class="field"><label>Security</label><select name="secure">${App.opts([['ssl', 'SSL (port 465)'], ['tls', 'STARTTLS (port 587)'], ['none', 'None']], sm.secure || 'ssl')}</select></div>
             <div class="field"><label>Username</label><input name="user" value="${esc(sm.user || '')}" autocomplete="off"></div></div>
           <div class="form-row"><div class="field"><label>Password</label><input type="password" name="pass" value="${esc(sm.pass || '')}" autocomplete="new-password"></div>
-            <div class="field"><label>From email</label><input type="email" name="from_email" value="${esc(sm.from_email || '')}"></div></div>
+            <div class="field"><label>From email</label><input type="email" name="from_email" value="${esc(sm.from_email || '')}" placeholder="portal@devtech.ng"></div></div>
           <div class="field"><label>From name</label><input name="from_name" value="${esc(sm.from_name || '')}"></div>
           <div class="actions"><button class="btn primary" type="submit">Save email settings</button><button class="btn" type="button" id="se-test"><i class="ti ti-mail-forward"></i>Send test email</button></div></form>
       </div>`;
+    $('#se-co', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = App.formData(e.target);
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: d }));
+        App.cfg = (await api('session')).config;
+        const bn = $('.sidebar .brand-name');
+        if (bn) bn.textContent = App.cfg.company;
+        toast('Company details saved');
+      } catch (err) { App.fail(err); }
+    });
     $('#se-lists', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
       const d = App.formData(e.target);

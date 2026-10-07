@@ -78,6 +78,7 @@ uploads/         Receipts and photos (web access blocked; served through file.ph
 
 - **Report questions** are in `inc/schema.php`. Change wording or options there, and the form, validation, CSV import and export all follow.
 - **Currency, timezone, upload limits and poll interval** are in `config.php`.
+- **Logo**: replace `assets/logo.png` (full logo) and `assets/logo-mark.png` (round icon). The company name and address can be changed under **Settings → Company**.
 - **Colours** are the variables at the top of `assets/app.css` (`--brand` is the purple).
 
 ## Security notes
