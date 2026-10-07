@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+if (PHP_VERSION_ID < 80100) {
+    http_response_code(500);
+    header("Content-Type: text/html; charset=utf-8");
+    exit("<div style=\"font-family:Arial,sans-serif;max-width:560px;margin:60px auto;padding:20px;border:1px solid #f0c0c0;border-radius:10px;background:#fff6f6\"><h2 style=\"margin-top:0\">PHP 8.1 or newer is required</h2><p>This server is running PHP " . PHP_VERSION . ". In cPanel, open <b>MultiPHP Manager</b> (or <b>Select PHP Version</b>), choose PHP 8.1 or newer for this domain, then reload this page.</p></div>");
+}
+
 define('APP_ROOT', dirname(__DIR__));
 
 if (!is_file(APP_ROOT . '/config.php')) {
