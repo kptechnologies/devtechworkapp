@@ -1,0 +1,12 @@
+# Local settings and secrets (created by install.php)
+config.php
+
+# Uploaded receipts and photos
+uploads/*
+!uploads/.htaccess
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
