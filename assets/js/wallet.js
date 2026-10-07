@@ -374,6 +374,7 @@
     $('#py-adjust', ctx.el).addEventListener('click', () => openAdjust(null, staff));
     $('#py-send', ctx.el).addEventListener('click', async (ev) => {
       ev.preventDefault();
+      const btn = ev.currentTarget; // currentTarget is cleared once the confirm dialog is awaited
       const d = App.formData(form);
       const errs = {};
       if (!d.user_ids?.length) errs.user_ids = 'Pick at least one staff member.';
@@ -382,7 +383,7 @@
       const total = d.user_ids.length * Number(d.amount);
       if (!(await App.confirm('Send payment?', `${money(total)} in total to ${d.user_ids.length} staff (${money(d.amount)} each) as ${esc(d.category)}.`, { ok: 'Send now' }))) return;
       try {
-        const r = await App.busy(ev.currentTarget, () => api('credit_send', { data: { ...d, user_ids: d.user_ids.map(Number) }, files: up.files() }));
+        const r = await App.busy(btn, () => api('credit_send', { data: { ...d, user_ids: d.user_ids.map(Number) }, files: up.files() }));
         toast(`Sent to ${r.count} staff`);
         App.reroute();
       } catch (err) { App.fail(err); }

@@ -342,6 +342,7 @@
     first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   App.busy = async (btn, fn) => {
+    if (!btn) return fn();
     const html = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>';
