@@ -1,6 +1,6 @@
 # Uploads the portal to cPanel (staff.devtech.ng) over FTP whenever main changes.
 # Needs repository secrets: FTP_SERVER, FTP_USERNAME, FTP_PASSWORD.
-# Optional repository variable FTP_SERVER_DIR (default: staff.devtech.ng/).
+# Optional repository variable FTP_SERVER_DIR (default: ./, the FTP account's home, which is the staff.devtech.ng folder).
 name: Deploy to cPanel
 
 on:
@@ -28,7 +28,7 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
-          server-dir: ${{ vars.FTP_SERVER_DIR || 'staff.devtech.ng/' }}
+          server-dir: ${{ vars.FTP_SERVER_DIR || './' }}
           # Live settings, receipts/photos and the one-time installer stay untouched on the server.
           exclude: |
             **/.git*

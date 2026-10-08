@@ -44,7 +44,7 @@ Upload the new files over the old ones (keep `config.php` and `uploads/`). The d
 1. cPanel → *FTP Accounts* → create an account (e.g. `deploy@devtech.ng`) and note the FTP server shown under *Configure FTP Client*.
 2. GitHub repo → *Settings → Secrets and variables → Actions*:
    - Secrets: `FTP_SERVER` (e.g. `ftp.devtech.ng`), `FTP_USERNAME`, `FTP_PASSWORD`.
-   - Variable `FTP_SERVER_DIR`, which is the portal folder **relative to that FTP account's home**, ending in `/`. If it isn't set, `staff.devtech.ng/` is used. If the FTP account's home is already the portal folder, set it to `./`.
+   - Variable `FTP_SERVER_DIR`, which is the portal folder **relative to that FTP account's home**, ending in `/`. If it isn't set, `./` is used, which is right when the FTP account's home is the portal folder (as with `devtech@staff.devtech.ng`).
 
 The first run uploads every file. Later runs only upload what changed.
 
