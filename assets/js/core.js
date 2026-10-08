@@ -120,6 +120,7 @@
     if (!res.ok || body.ok === false) {
       const err = new Error(body.error || 'Something went wrong.');
       err.fields = body.fields || null;
+      err.code = body.code || null;
       err.status = res.status;
       throw err;
     }
@@ -252,6 +253,8 @@
       return file;
     }
   }
+
+  App.compressImage = compressImage;
 
   /** File picker with previews. Returns { files: () => File[] (compressed), count }. */
   App.uploader = (container, { existing = 0, label = 'Add photos', accept = 'image/*,application/pdf', capture = false } = {}) => {
@@ -409,16 +412,20 @@
       return [
         { label: 'Admin' },
         { href: '', icon: 'layout-dashboard', text: 'Overview', mobile: true },
-        { href: 'pay', icon: 'send', text: 'Send payment', mobile: true },
+        { href: 'pay', icon: 'send', text: 'Send payment' },
         { href: 'review', icon: 'receipt', text: 'Expense review', badge: 'review', mobile: true },
         { href: 'requests', icon: 'cash', text: 'Funding requests', badge: 'requests' },
         { href: 'balances', icon: 'wallet', text: 'Balances' },
         { href: 'ledger', icon: 'list-details', text: 'Ledger' },
         { label: 'Work' },
+        { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports', mobile: true },
+        { href: 'attendance', icon: 'clock-check', text: 'Attendance' },
+        { href: 'clients', icon: 'building-community', text: 'Clients' },
         { href: 'issues', icon: 'layout-kanban', text: 'Issues board' },
         { label: 'Setup' },
         { href: 'staff', icon: 'users', text: 'Staff setup' },
+        { href: 'tools', icon: 'tools', text: 'Work tools' },
         { href: 'import', icon: 'file-import', text: 'Import history' },
         { href: 'settings', icon: 'settings', text: 'Settings' },
         { href: 'profile', icon: 'user', text: 'Profile', mobileOnly: true },
@@ -429,7 +436,9 @@
       { href: '', icon: 'home', text: 'Home', mobile: true },
       { href: 'wallet', icon: 'wallet', text: 'Wallet', mobile: true },
       { href: 'report/new', icon: 'clipboard-plus', text: 'New report', mobile: true },
-      { href: 'reports', icon: 'clipboard-text', text: 'My reports', mobile: true },
+      { href: 'jobs', icon: 'clipboard-list', text: 'My jobs', badge: 'jobs', mobile: true },
+      { href: 'reports', icon: 'clipboard-text', text: 'My reports' },
+      { href: 'attendance', icon: 'clock-check', text: 'My attendance' },
       { href: 'requests', icon: 'cash', text: 'Funding requests' },
       { href: 'profile', icon: 'user', text: 'Profile', mobile: true },
     ];
@@ -461,7 +470,7 @@
           <main class="content" id="view"></main>
         </div>
         <nav class="mobile-nav">${items.filter((i) => i.mobile || i.mobileOnly).slice(0, 5).map((i) =>
-          `<a href="#/${i.href}" data-nav="${i.href}"><i class="ti ti-${i.icon}"></i>${esc(i.text.replace('Expense review', 'Review').replace('Send payment', 'Pay').replace('Work reports', 'Reports').replace('My reports', 'Reports').replace('New report', 'Report'))}${i.badge ? `<span class="badge hide" data-badge="${i.badge}"></span>` : ''}</a>`).join('')}</nav>
+          `<a href="#/${i.href}" data-nav="${i.href}"><i class="ti ti-${i.icon}"></i>${esc(i.text.replace('Expense review', 'Review').replace('Send payment', 'Pay').replace('Work reports', 'Reports').replace('My reports', 'Reports').replace('New report', 'Report').replace('Job orders', 'Jobs').replace('My jobs', 'Jobs'))}${i.badge ? `<span class="badge hide" data-badge="${i.badge}"></span>` : ''}</a>`).join('')}</nav>
       </div>`;
     $('#logout-btn').addEventListener('click', logout);
     $('#bell-btn').addEventListener('click', openNotifications);
@@ -519,6 +528,7 @@
     }
     if ('pending_reviews' in p) App.badges.review = p.pending_reviews;
     if ('pending_requests' in p) App.badges.requests = p.pending_requests;
+    if ('jobs' in p) App.badges.jobs = p.jobs;
     $$('[data-badge]').forEach((b) => {
       const n = App.badges[b.dataset.badge] || 0;
       b.textContent = n;

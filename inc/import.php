@@ -154,6 +154,9 @@ function act_import_reports(array $in, array $me): void
     $rows = read_csv_upload();
     $header = array_shift($rows);
     $fields = report_fields();
+    foreach (LEGACY_REPORT_FIELDS as $id => $label) {
+        $fields[$id] = $fields[$id] ?? ['id' => $id, 'label' => $label, 'type' => 'text'];
+    }
     $byNorm = [];
     foreach ($fields as $id => $f) {
         $byNorm[norm_header($f['label'])] = $id;
@@ -223,6 +226,7 @@ function act_import_reports(array $in, array $me): void
             $skipped++;
             continue;
         }
+        $data = report_normalize($data);
         $sum = report_summary($data);
         $cols = implode(', ', array_keys($sum));
         $qs = implode(', ', array_fill(0, count($sum), '?'));

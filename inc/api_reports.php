@@ -3,25 +3,59 @@
 
 const REPORT_LIST_COLS = 'r.id, r.user_id, u.name AS user_name, r.report_date, r.location, r.work_type, r.finished, r.lesson,
     r.classes_taught, r.laptops_total, r.laptops_faulty, r.laptop_resolved, r.complaint, r.followup, r.urgent, r.installation,
-    r.issues_closed, r.source, r.created_at, r.updated_at';
+    r.issues_closed, r.priority, r.source, r.created_at, r.updated_at';
 
 /** Summary columns stored alongside the JSON so lists and dashboards stay fast. */
 function report_summary(array $d): array
 {
+    $d = report_normalize($d);
+    $duties = (array)$d['duties'];
+    $did = fn(string $duty) => in_array($duty, $duties, true) ? 'Yes' : 'No';
+    // Laptops repaired on a maintenance visit count as faulty laptops when there's no lab count.
+    $faulty = (int)($d['laptops_faulty'] ?? 0);
+    $resolved = (string)($d['laptop_resolved'] ?? '');
+    $laptops = array_filter((array)($d['devices'] ?? []), fn($r) => in_array($r['device'] ?? '', ['Laptop', 'Desktop computer'], true));
+    if (!$faulty && $laptops) {
+        $faulty = count($laptops);
+        $fixed = count(array_filter($laptops, fn($r) => ($r['status'] ?? '') === 'Fixed'));
+        $resolved = $fixed === $faulty ? 'Yes – fixed' : ($fixed ? 'Partially resolved' : 'No – pending');
+    }
     return [
         'location'        => mb_substr((string)($d['location'] ?? ''), 0, 120),
-        'work_type'       => mb_substr((string)($d['work_type'] ?? ''), 0, 120),
+        'work_type'       => mb_substr($duties ? implode(', ', $duties) : (string)($d['work_type'] ?? ''), 0, 120),
         'finished'        => mb_substr((string)($d['finished'] ?? ''), 0, 60),
-        'lesson'          => mb_substr((string)($d['lesson'] ?? ''), 0, 10),
+        'lesson'          => $duties ? $did(DUTY_CLASS) : mb_substr((string)($d['lesson'] ?? ''), 0, 10),
         'classes_taught'  => (int)($d['classes_taught'] ?? 0),
         'laptops_total'   => (int)($d['laptops_total'] ?? 0),
-        'laptops_faulty'  => (int)($d['laptops_faulty'] ?? 0),
-        'laptop_resolved' => mb_substr((string)($d['laptop_resolved'] ?? ''), 0, 60),
+        'laptops_faulty'  => $faulty,
+        'laptop_resolved' => mb_substr($resolved, 0, 60),
         'complaint'       => mb_substr((string)($d['complaint'] ?? ''), 0, 120),
         'followup'        => mb_substr((string)($d['followup'] ?? ''), 0, 120),
         'urgent'          => mb_substr((string)($d['urgent'] ?? ''), 0, 60),
-        'installation'    => mb_substr((string)($d['install'] ?? ''), 0, 10),
+        'installation'    => $duties ? (in_array(DUTY_INSTALL, $duties, true) || in_array(DUTY_MAINT, $duties, true) ? 'Yes' : 'No')
+            : mb_substr((string)($d['install'] ?? ''), 0, 10),
+        'priority'        => report_priority($d),
     ];
+}
+
+/** Highest of the staff member's own rating and the priority of devices still not fixed: '', Normal, High or Urgent. */
+function report_priority(array $d): string
+{
+    $levels = array_merge([(string)($d['issue_priority'] ?? '')], array_map(fn($x) => (string)($x['priority'] ?? ''), pending_devices($d)));
+    foreach (['Urgent', 'High', 'Normal'] as $p) {
+        if (in_array($p, $levels, true)) {
+            return $p;
+        }
+    }
+    return '';
+}
+
+const PRIORITY_ORDER = "FIELD(r.priority, 'High', 'Urgent') DESC";
+
+/** Device entries from a maintenance report that still need attention. */
+function pending_devices(array $d): array
+{
+    return array_values(array_filter((array)($d['devices'] ?? []), fn($r) => ($r['status'] ?? '') !== '' && ($r['status'] ?? '') !== 'Fixed'));
 }
 
 function report_where(array $in, array $me, array &$params): string
@@ -86,7 +120,7 @@ function load_report(int $id, array $me): array
     if (!is_admin($me) && (int)$r['user_id'] !== $me['id']) {
         fail('You can only view your own reports.', 403);
     }
-    $r['data'] = json_decode($r['data'], true) ?: [];
+    $r['data'] = report_normalize(json_decode($r['data'], true) ?: []);
     return $r;
 }
 
@@ -129,11 +163,20 @@ function act_report_save(array $in, array $me): void
         $ownerId = $me['id'];
     }
     save_uploads('report', $id, $me['id']);
+    link_report_jobs($id, $ownerId, $data);
     db()->commit();
     touch_change();
 
+    $high = in_array($sum['priority'], ['High', 'Urgent'], true);
+    if ($existing && $high && !in_array($existing['priority'], ['High', 'Urgent'], true)) {
+        notify_admins('report', strtoupper($sum['priority']) . ': ' . $existing['user_name'] . '’s report needs follow-up',
+            $sum['location'] . ' · ' . $data['report_date'], 'reports/' . $id, true);
+    }
     if (!$existing) {
         $flags = [];
+        if ($high) {
+            $flags[] = strtoupper($sum['priority']) . ' priority';
+        }
         if (str_starts_with($sum['urgent'], 'Yes')) {
             $flags[] = 'urgent request';
         }
@@ -142,6 +185,9 @@ function act_report_save(array $in, array $me): void
         }
         if ($sum['laptops_faulty'] > 0) {
             $flags[] = $sum['laptops_faulty'] . ' faulty laptop(s)';
+        }
+        if ($pending = count(pending_devices($data))) {
+            $flags[] = $pending . ' device(s) not fixed';
         }
         $title = $me['name'] . ' submitted a report' . ($flags ? ' · ' . implode(', ', $flags) : '');
         // Email admins only when something needs attention.
@@ -182,7 +228,7 @@ function act_issues(array $in, array $me): void
     $params = [$from];
     $closed = !empty($in['closed']) ? '' : 'AND r.issues_closed = 0';
     $rows = q('SELECT ' . REPORT_LIST_COLS . ", r.data FROM reports r JOIN users u ON u.id = r.user_id
-               WHERE r.report_date >= ? $closed ORDER BY r.report_date DESC, r.id DESC", $params)->fetchAll();
+               WHERE r.report_date >= ? $closed ORDER BY " . PRIORITY_ORDER . ", r.report_date DESC, r.id DESC", $params)->fetchAll();
     $cols = ['pending' => [], 'laptops' => [], 'people' => [], 'urgent' => []];
     foreach ($rows as $r) {
         $d = json_decode($r['data'], true) ?: [];
@@ -191,8 +237,12 @@ function act_issues(array $in, array $me): void
         if ($r['finished'] !== '' && $r['finished'] !== 'Yes – completed') {
             $cols['pending'][] = $base + ['note' => $d['pending_reason'] ?? ''];
         }
-        if ((int)$r['laptops_faulty'] > 0 && $r['laptop_resolved'] !== 'Yes – fixed') {
-            $cols['laptops'][] = $base + ['note' => $d['faulty_details'] ?? ''];
+        $devices = pending_devices($d);
+        if ($devices || ((int)$r['laptops_faulty'] > 0 && $r['laptop_resolved'] !== 'Yes – fixed')) {
+            $note = $devices ? implode("\n", array_map(fn($x) => (in_array($x['priority'] ?? '', ['High', 'Urgent'], true) ? strtoupper($x['priority']) . ' · ' : '')
+                . trim($x['device'] . ' ' . ($x['tag'] ?? '')) . ': ' . implode(', ', (array)($x['faults'] ?? [])) . ' (' . $x['status'] . ')', $devices))
+                : ($d['faulty_details'] ?? '');
+            $cols['laptops'][] = $base + ['note' => $note];
         }
         $hasComplaint = $r['complaint'] !== '' && $r['complaint'] !== 'No complaint';
         $hasFollow = $r['followup'] !== '' && $r['followup'] !== 'No';
@@ -221,10 +271,15 @@ function act_reports_export(array $in, array $me): void
     fwrite($out, "\xEF\xBB\xBF");
     fputcsv($out, array_merge(['Timestamp', 'Email address', 'Full Name'], array_map(fn($f) => $f['label'], array_values($fields)), ['Attachments']));
     while ($r = $rows->fetch()) {
-        $d = json_decode($r['data'], true) ?: [];
+        $d = report_normalize(json_decode($r['data'], true) ?: []);
         $line = [$r['created_at'], $r['user_email'], $r['user_name']];
         foreach ($fields as $id => $f) {
             $v = $d[$id] ?? '';
+            if ($f['type'] === 'rows') {
+                // One line per device: "Laptop LAP-014: RAM fault / upgrade; Replaced RAM [Fixed]"
+                $v = implode("\n", array_map(fn($x) => trim(($x['device'] ?? '') . ' ' . ($x['tag'] ?? '')) . ': '
+                    . implode(', ', (array)($x['faults'] ?? [])) . '; ' . ($x['action'] ?? '') . ' [' . ($x['status'] ?? '') . ']', (array)$v));
+            }
             $line[] = csv_safe(is_array($v) ? implode(', ', $v) : (string)$v);
         }
         $line[] = (int)q("SELECT COUNT(*) FROM attachments WHERE owner_type='report' AND owner_id = ?", [$r['id']])->fetchColumn();

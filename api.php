@@ -5,9 +5,14 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/api_reports.php';
 require __DIR__ . '/inc/api_wallet.php';
 require __DIR__ . '/inc/api_admin.php';
+require __DIR__ . '/inc/api_jobs.php';
+require __DIR__ . '/inc/api_people.php';
+require __DIR__ . '/inc/api_clients.php';
+require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
 start_session();
+ensure_schema();
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
@@ -33,7 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $public = ['session', 'login'];
 $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
-    'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export'];
+    'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
+    'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
+    'attendance_report', 'attendance_report_export', 'clients_list', 'client_get'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -76,6 +83,12 @@ function public_config(array $me): array
         'max_files'     => (int)cfg('upload_max_files', 6),
         'max_mb'        => (int)cfg('upload_max_mb', 8),
         'schema'        => report_schema_resolved(),
+        'duties'        => DUTIES,
+        'fault_types'   => fault_types(),
+        'work_start'    => work_start(),
+        'work_end'      => work_end(),
+        'late_grace'    => late_grace(),
+        'clients'       => client_names(),
     ];
 }
 
@@ -151,7 +164,7 @@ function act_password_change(array $in, array $me): void
 function act_profile_save(array $in, array $me): void
 {
     q('UPDATE users SET phone = ?, location = ? WHERE id = ?', [str_in($in['phone'] ?? '', 40), str_in($in['location'] ?? '', 120), $me['id']]);
-    json_out(['ok' => true, 'user' => q('SELECT id, name, email, phone, role, location, active FROM users WHERE id = ?', [$me['id']])->fetch()]);
+    json_out(['ok' => true, 'user' => current_user(true)]);
 }
 
 /* ------------------------------------------------- live pulse + notifications */
@@ -163,11 +176,12 @@ function act_pulse(array $in, array $me): void
         'change'  => (float)(json_decode((string)(q("SELECT v FROM settings WHERE k = '_last_change'")->fetchColumn() ?: '0'), true) ?: 0),
         'unread'  => (int)q('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL', [$me['id']])->fetchColumn(),
         'wallet'  => wallet_stats($me['id']),
-    ];
+    ] + job_badges($me);
     if (is_admin($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
         $out['pending_requests'] = (int)q("SELECT COUNT(*) FROM fund_requests WHERE status='pending'")->fetchColumn();
     }
+    maybe_run_reminders(); // fallback for hosts without a cron job
     json_out($out);
 }
 
@@ -199,6 +213,15 @@ function act_attachment_delete(array $in, array $me): void
             $st = q('SELECT status FROM wallet_txns WHERE id = ?', [$a['owner_id']])->fetchColumn();
             if (!in_array($st, ['posted', 'queried'], true)) {
                 fail('This expense has been reviewed, so its receipts are locked.', 403);
+            }
+        }
+        if (in_array($a['owner_type'], ['attend', 'attendout'], true)) {
+            fail('Clock-in photos can\'t be removed.', 403);
+        }
+        if ($a['owner_type'] === 'jobnote') {
+            $st = q('SELECT j.status FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ?', [$a['owner_id']])->fetchColumn();
+            if (in_array($st, ['awaiting_check', 'done'], true)) {
+                fail('This job has been sent for checking, so its photos are locked.', 403);
             }
         }
     }

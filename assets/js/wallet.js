@@ -35,6 +35,7 @@
         <div class="page-head"><div><p class="muted">${greet}</p><h1>${esc(App.user.name.split(' ')[0])}</h1></div></div>
         <div class="grid g-main">
           <div class="stack">
+            <div id="home-clock"></div>
             ${heroHtml(r.wallet)}
             <div class="quick">
               <button data-act="expense"><i class="ti ti-receipt out"></i>Add expense</button>
@@ -48,6 +49,7 @@
               ${r.txns.length ? `<ul class="list">${r.txns.map((t) => txnRow(t)).join('')}</ul>` : App.empty('wallet', 'No transactions yet', 'Money your admin sends and expenses you log show up here.')}</div>
           </div>
           <div class="stack">
+            <div class="card" id="home-jobs"></div>
             <div class="card"><div class="card-head"><h3>My recent reports</h3><a href="#/reports" class="small">All reports</a></div>
               ${r.reports.length ? `<ul class="list">${r.reports.map((x) => `<li class="li" onclick="location.hash='#/reports/${x.id}'">
                 <div class="main-col"><div class="t">${esc(fmtDate(x.report_date))}</div><div class="s">${esc(x.location)} · ${esc(x.work_type)}</div></div>${App.finishedPill(x.finished)}</li>`).join('')}</ul>`
@@ -65,6 +67,8 @@
         else if (a === 'request') openRequest();
         else App.go('report/new');
       }));
+      App.renderClockCard?.($('#home-clock', ctx.el));
+      App.renderMyJobs?.($('#home-jobs', ctx.el));
     };
     ctx.refresh = () => load().catch(() => {});
     await load();

@@ -3,6 +3,7 @@ declare(strict_types=1);
 /* Serves attachments only to their owner or an admin. ?id=123[&thumb=1][&download=1] */
 require __DIR__ . '/inc/bootstrap.php';
 start_session();
+ensure_schema();
 
 $me = current_user();
 if (!$me) {
@@ -19,6 +20,13 @@ if (!is_admin($me)) {
         'report'  => q('SELECT user_id FROM reports WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'txn'     => q('SELECT user_id FROM wallet_txns WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'request' => q('SELECT user_id FROM fund_requests WHERE id = ?', [$a['owner_id']])->fetchColumn(),
+        'attend', 'attendout' => q('SELECT user_id FROM attendance WHERE id = ?', [$a['owner_id']])->fetchColumn(),
+        'tool'    => q('SELECT holder_id FROM tools WHERE id = ?', [$a['owner_id']])->fetchColumn(),
+        'avatar'  => $a['owner_id'],
+        // Job photos: whoever logged the job and the staff currently on it.
+        'jobnote' => q('SELECT ? FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ? AND (j.created_by = ?
+                        OR EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL))',
+                        [$me['id'], $a['owner_id'], $me['id'], $me['id']])->fetchColumn(),
         default   => null,
     };
     if ((int)$owner !== $me['id']) {

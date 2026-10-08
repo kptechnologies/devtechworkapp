@@ -19,6 +19,7 @@ if (!is_file(APP_ROOT . '/config.php')) {
 $GLOBALS['CONFIG'] = require APP_ROOT . '/config.php';
 date_default_timezone_set(cfg('timezone', 'Africa/Lagos'));
 
+require_once __DIR__ . '/tables.php';
 require __DIR__ . '/schema.php';
 require __DIR__ . '/wallet.php';
 require __DIR__ . '/notify.php';
@@ -106,9 +107,10 @@ function current_user(bool $refresh = false): ?array
     }
     $user = null;
     if (!empty($_SESSION['uid'])) {
-        $r = q('SELECT id, name, email, phone, role, location, active FROM users WHERE id = ?', [$_SESSION['uid']])->fetch();
+        $r = q('SELECT id, name, email, phone, role, location, job_title, duties, active FROM users WHERE id = ?', [$_SESSION['uid']])->fetch();
         if ($r && (int)$r['active'] === 1) {
             $r['id'] = (int)$r['id'];
+            $r['duties'] = json_decode((string)$r['duties'], true) ?: [];
             $user = $r;
         }
     }
@@ -181,4 +183,34 @@ function str_in($v, int $max = 2000): string
 {
     $s = trim((string)($v ?? ''));
     return mb_substr($s, 0, $max);
+}
+
+/** Upgrade the database after new code is uploaded: runs once per SCHEMA_VERSION bump. */
+function ensure_schema(): void
+{
+    $from = (int)setting('_schema_version');
+    if ($from >= SCHEMA_VERSION) {
+        return;
+    }
+    apply_schema(db());
+    if ($from < 3) {
+        seed_clients();
+    }
+    save_setting('_schema_version', SCHEMA_VERSION);
+}
+
+/** v3: build the clients directory from the schools list, existing jobs and saved site GPS points. */
+function seed_clients(): void
+{
+    $coords = setting('site_coords');
+    $coords = is_array($coords) ? $coords : [];
+    $names = array_merge(array_values(setting('locations') ?: []), q("SELECT DISTINCT client_name FROM jobs WHERE client_name <> ''")->fetchAll(PDO::FETCH_COLUMN));
+    foreach (array_unique(array_filter(array_map('trim', $names))) as $name) {
+        if (preg_match('/^(office|other)\b/i', $name)) {
+            continue;
+        }
+        [$lat, $lng] = $coords[$name] ?? [null, null];
+        q('INSERT IGNORE INTO clients (name, type, lat, lng, created_at) VALUES (?, ?, ?, ?, NOW())', [mb_substr($name, 0, 190), 'school', $lat, $lng]);
+    }
+    q('UPDATE jobs j JOIN clients c ON c.name = j.client_name SET j.client_id = c.id WHERE j.client_id IS NULL');
 }
