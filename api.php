@@ -76,7 +76,7 @@ function public_config(array $me): array
         'currency'      => cfg('currency', '₦'),
         'today'         => today(),
         'poll'          => (int)cfg('poll_seconds', 10),
-        'locations'     => array_values(setting('locations') ?: []),
+        'locations'     => location_options(),
         'categories'    => array_values(setting('expense_categories') ?: []),
         'credit_types'  => array_values(setting('credit_types') ?: []),
         'allowance'     => (float)(setting('daily_allowance_default') ?: 0),

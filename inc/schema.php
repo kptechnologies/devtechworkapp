@@ -300,7 +300,7 @@ function report_schema_resolved(): array
     foreach ($schema as &$sec) {
         foreach ($sec['fields'] as &$f) {
             if (($f['opts'] ?? null) === '@locations') {
-                $f['opts'] = array_values(setting('locations') ?: []);
+                $f['opts'] = location_options();
             }
             foreach ($f['cols'] ?? [] as $i => $c) {
                 if (($c['opts'] ?? null) === '@devices') {

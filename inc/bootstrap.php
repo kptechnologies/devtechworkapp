@@ -70,6 +70,28 @@ function setting(string $key)
     return $cache[$key] ?? cfg($key);
 }
 
+/** Schools/locations to pick from: the Settings list plus every active client, with "Office"/"Other" kept last. */
+function location_options(): array
+{
+    $list = array_values(setting('locations') ?: []);
+    try {
+        $clients = q('SELECT name FROM clients WHERE active = 1 ORDER BY name')->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) {
+        $clients = []; // clients table not created yet
+    }
+    $seen = array_map('mb_strtolower', $list);
+    $extra = [];
+    foreach ($clients as $name) {
+        if (!in_array(mb_strtolower($name), $seen, true)) {
+            $extra[] = $name;
+            $seen[] = mb_strtolower($name);
+        }
+    }
+    $tail = array_values(array_filter($list, fn($n) => preg_match('/^(office|other)\b/i', $n)));
+    $head = array_values(array_filter($list, fn($n) => !preg_match('/^(office|other)\b/i', $n)));
+    return array_merge($head, $extra, $tail);
+}
+
 function save_setting(string $key, $value): void
 {
     q('INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)', [$key, json_encode($value, JSON_UNESCAPED_UNICODE)]);
