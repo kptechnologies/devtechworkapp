@@ -39,6 +39,15 @@ A self-hosted web app for daily work reports, job orders, staff attendance, work
 
 Upload the new files over the old ones (keep `config.php` and `uploads/`). The database upgrades itself the next time anyone opens the portal: new tables and columns are added and nothing is deleted.
 
+**Automatic deploys.** `.github/workflows/deploy.yml` uploads changed files over FTP every time `main` changes. You can also run it by hand from the *Actions* tab. It never touches `config.php`, `uploads/` or `install.php`. One-time setup:
+
+1. cPanel → *FTP Accounts* → create an account (e.g. `deploy@devtech.ng`) and note the FTP server shown under *Configure FTP Client*.
+2. GitHub repo → *Settings → Secrets and variables → Actions*:
+   - Secrets: `FTP_SERVER` (e.g. `ftp.devtech.ng`), `FTP_USERNAME`, `FTP_PASSWORD`.
+   - Variable `FTP_SERVER_DIR`, which is the portal folder **relative to that FTP account's home**, ending in `/`. If it isn't set, `staff.devtech.ng/` is used. If the FTP account's home is already the portal folder, set it to `./`.
+
+The first run uploads every file. Later runs only upload what changed.
+
 ## How the wallet works
 
 | Action | Who | Effect on balance |
