@@ -33,7 +33,7 @@
       const [from, to] = rangeDates(range);
       const d = await api('dashboard', { query: { from, to } });
       const pal = App.palette();
-      const m = d.money, rp = d.reports;
+      const m = d.money, rp = d.reports, at = d.attendance, jb = d.jobs;
       const completion = rp.n ? Math.round((rp.done / rp.n) * 100) : 0;
       const kpi = (label, value, sub, icon, tone, extra = '') => `<div class="card kpi ${extra}"><div class="kpi-icon ${tone}"><i class="ti ti-${icon}"></i></div>
         <div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div></div>`;
@@ -54,9 +54,17 @@
           ${kpi('Faulty laptops', rp.faulty, 'Latest report per school', 'device-laptop-off', rp.faulty ? 'tone-bad' : 'tone-in')}
           ${kpi('Waiting on you', m.pending_reviews + m.pending_requests, `${m.pending_reviews} expenses · ${m.pending_requests} requests`, 'bell-ringing', (m.pending_reviews + m.pending_requests) ? 'tone-out' : 'tone-in')}
         </div>
-        ${d.missing_today.length ? `<div class="card card-pad" style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="muted small"><i class="ti ti-clock-exclamation"></i> Not reported today:</span>
-          ${d.missing_today.map((s) => `<a class="pill bad" href="#/wallet/${s.id}">${esc(s.name)}</a>`).join('')}</div>` : ''}
+        <div class="grid g4" style="margin-bottom:14px">
+          ${kpi('Clocked in today', `${at.in} <span class="faint" style="font-size:15px">of ${at.staff}</span>`, `${at.on_site} on site now`, 'login', 'tone-brand')}
+          ${kpi('Late today', at.late, `Arrived after ${esc(at.work_start)}`, 'clock-exclamation', at.late ? 'tone-out' : 'tone-in')}
+          ${kpi('Jobs to check', jb.to_check + jb.requested, `${jb.to_check} completed · ${jb.requested} logged by staff`, 'clipboard-check', (jb.to_check + jb.requested) ? 'tone-out' : 'tone-in')}
+          ${kpi('Active jobs', jb.active, `${jb.overdue} overdue · ${jb.done} closed in period`, 'clipboard-list', jb.overdue ? 'tone-bad' : 'tone-info')}
+        </div>
+        ${d.missing_today.length || at.missing.length ? `<div class="card card-pad" style="margin-bottom:14px;display:grid;gap:8px">
+          ${at.missing.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a class="muted small" href="#/attendance"><i class="ti ti-user-off"></i> Not clocked in:</a>
+            ${at.missing.map((s) => `<a class="pill out" href="#/staff/${s.id}">${esc(s.name)}</a>`).join('')}</div>` : ''}
+          ${d.missing_today.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="muted small"><i class="ti ti-clock-exclamation"></i> Not reported today:</span>
+            ${d.missing_today.map((s) => `<a class="pill bad" href="#/staff/${s.id}">${esc(s.name)}</a>`).join('')}</div>` : ''}</div>` : ''}
         <div class="grid g-main" style="margin-bottom:14px">
           <div class="card"><div class="card-head"><h3>Sent vs spent</h3><span class="faint small">${d.by_day ? 'by day' : 'by month'}</span></div>
             <div class="card-body"><div class="chart-box"><canvas id="ch-money"></canvas></div></div></div>
@@ -84,7 +92,7 @@
             ${d.top_expenses.length ? `<ul class="list">${d.top_expenses.map((t) => `<li class="li" data-txn="${t.id}"><div class="main-col"><div class="t">${esc(t.description || t.category)}</div>
               <div class="s">${esc(t.user_name)} · ${esc(fmtDate(t.txn_date, false))}</div></div><span class="amt out">${money(t.amount, { short: true })}</span></li>`).join('')}</ul>` : App.empty('receipt-off', 'No expenses')}</div>
           <div class="card"><div class="card-head"><h3>Top spenders</h3></div><div class="card-body">${d.top_spenders.length ? '<div class="chart-box sm"><canvas id="ch-spend"></canvas></div>' : App.empty('users', 'No spending')}</div></div>
-          <div class="card"><div class="card-head"><h3>Work type</h3></div><div class="card-body">${d.by_work_type.length ? '<div class="chart-box sm"><canvas id="ch-work"></canvas></div>' : App.empty('chart-pie', 'No reports')}</div></div>
+          <div class="card"><div class="card-head"><h3>What staff did</h3></div><div class="card-body">${d.by_work_type.length ? '<div class="chart-box sm"><canvas id="ch-work"></canvas></div>' : App.empty('chart-pie', 'No reports')}</div></div>
         </div>
         <div class="grid g-main">
           <div class="card"><div class="card-head"><h3>Reports by task status</h3><a href="#/reports" class="small">All reports</a></div>
@@ -159,6 +167,41 @@
   }, { title: 'Overview', admin: true, live: true });
 
   /* ---------------------------------------------------------- staff setup */
+  /** Account modal: name, email, role, active, password. */
+  function editUser(u, onSaved) {
+    const isNew = !u;
+    u = u || { name: '', email: '', phone: '', location: '', role: 'staff', active: 1 };
+    const el = App.modal(isNew ? 'Add staff' : `Edit ${esc(u.name)}`, `
+      <form id="us-form" novalidate>
+        <div class="form-row"><div class="field"><label for="us-n">Full name <span class="req">*</span></label><input id="us-n" name="name" value="${esc(u.name)}" autofocus></div>
+          <div class="field"><label for="us-e">Email <span class="req">*</span></label><input type="email" id="us-e" name="email" value="${esc(u.email)}" placeholder="name@devtech.ng"></div></div>
+        <div class="form-row"><div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
+          <div class="field"><label for="us-l">Assigned school / location</label><select id="us-l" name="location">${App.opts(App.cfg.locations.concat(u.location && !App.cfg.locations.includes(u.location) ? [u.location] : []), u.location, { placeholder: 'None' })}</select></div></div>
+        <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
+          <label class="opt"><input type="radio" name="role" value="staff" ${u.role !== 'admin' ? 'checked' : ''}><span>Staff</span></label>
+          <label class="opt"><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''}><span>Admin</span></label></div></div>
+          <div class="field"><div class="label">Status</div><label class="check-row" style="padding:9px 12px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}><span>Active (can sign in)</span></label></div></div>
+        <div class="field"><label for="us-pw">${isNew ? 'Starting password' : 'Set a new password'} ${isNew ? '<span class="req">*</span>' : ''}</label>
+          <div style="display:flex;gap:8px"><input type="text" id="us-pw" name="password" placeholder="${isNew ? 'At least 8 characters' : 'Leave blank to keep the current one'}" autocomplete="new-password">
+          <button type="button" class="btn" id="us-gen" title="Generate"><i class="ti ti-wand"></i></button></div>
+          <div class="help">Share it with them privately. They can change it under Profile.</div></div>
+        <label class="check-row"><input type="checkbox" name="send_welcome" ${isNew ? 'checked' : ''}><span>Email them their sign-in details (when a password is set and email is configured)</span></label>
+      </form>`, `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="us-save">${isNew ? 'Create account' : 'Save'}</button>`);
+    const form = $('#us-form', el);
+    $('#us-gen', el).addEventListener('click', () => { form.password.value = genPass(); });
+    $('#us-save', el).addEventListener('click', async (ev) => {
+      const d = App.formData(form);
+      if (!isNew) d.id = u.id;
+      try {
+        await App.busy(ev.currentTarget, () => api('user_save', { data: d }));
+        App.closeAll();
+        toast(isNew ? 'Account created' : 'Saved');
+        if (d.password) App.confirm('Password set', `Share these with ${esc(d.name)}:<br><br><b>Email:</b> ${esc(d.email)}<br><b>Password:</b> <code>${esc(d.password)}</code>`, { ok: 'Done' });
+        onSaved && onSaved();
+      } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+    });
+  }
+  App.editUser = editUser;
   const genPass = () => {
     const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
     const r = crypto.getRandomValues(new Uint32Array(10));
@@ -180,43 +223,13 @@
             <td class="r num ${u.balance < 0 ? 'bad' : ''}">${money(u.balance)}</td>
             <td class="hide-sm">${u.last_report ? esc(fmtDate(u.last_report)) : '<span class="faint">—</span>'}</td>
             <td>${u.role === 'admin' ? '<span class="pill brand">Admin</span>' : ''} ${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
-            <td><i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
-      $('#st-add', ctx.el).addEventListener('click', () => editUser(null));
-      $$('[data-u]', ctx.el).forEach((r) => r.addEventListener('click', () => editUser(items.find((u) => u.id === +r.dataset.u))));
+            <td style="white-space:nowrap"><button class="btn sm ghost" data-edit-u aria-label="Account and password" title="Account &amp; password"><i class="ti ti-key"></i></button><i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
+      $('#st-add', ctx.el).addEventListener('click', () => editUser(null, load));
+      $$('[data-u]', ctx.el).forEach((r) => r.addEventListener('click', (e) => {
+        if (e.target.closest('[data-edit-u]')) editUser(items.find((u) => u.id === +r.dataset.u), load);
+        else App.go(`staff/${r.dataset.u}`);
+      }));
     };
-    function editUser(u) {
-      const isNew = !u;
-      u = u || { name: '', email: '', phone: '', location: '', role: 'staff', active: 1 };
-      const el = App.modal(isNew ? 'Add staff' : `Edit ${esc(u.name)}`, `
-        <form id="us-form" novalidate>
-          <div class="form-row"><div class="field"><label for="us-n">Full name <span class="req">*</span></label><input id="us-n" name="name" value="${esc(u.name)}" autofocus></div>
-            <div class="field"><label for="us-e">Email <span class="req">*</span></label><input type="email" id="us-e" name="email" value="${esc(u.email)}" placeholder="name@devtech.ng"></div></div>
-          <div class="form-row"><div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
-            <div class="field"><label for="us-l">Assigned school / location</label><select id="us-l" name="location">${App.opts(App.cfg.locations.concat(u.location && !App.cfg.locations.includes(u.location) ? [u.location] : []), u.location, { placeholder: 'None' })}</select></div></div>
-          <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
-            <label class="opt"><input type="radio" name="role" value="staff" ${u.role !== 'admin' ? 'checked' : ''}><span>Staff</span></label>
-            <label class="opt"><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''}><span>Admin</span></label></div></div>
-            <div class="field"><div class="label">Status</div><label class="check-row" style="padding:9px 12px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}><span>Active (can sign in)</span></label></div></div>
-          <div class="field"><label for="us-pw">${isNew ? 'Starting password' : 'Set a new password'} ${isNew ? '<span class="req">*</span>' : ''}</label>
-            <div style="display:flex;gap:8px"><input type="text" id="us-pw" name="password" placeholder="${isNew ? 'At least 8 characters' : 'Leave blank to keep the current one'}" autocomplete="new-password">
-            <button type="button" class="btn" id="us-gen" title="Generate"><i class="ti ti-wand"></i></button></div>
-            <div class="help">Share it with them privately. They can change it under Profile.</div></div>
-          <label class="check-row"><input type="checkbox" name="send_welcome" ${isNew ? 'checked' : ''}><span>Email them their sign-in details (when a password is set and email is configured)</span></label>
-        </form>`, `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="us-save">${isNew ? 'Create account' : 'Save'}</button>`);
-      const form = $('#us-form', el);
-      $('#us-gen', el).addEventListener('click', () => { form.password.value = genPass(); });
-      $('#us-save', el).addEventListener('click', async (ev) => {
-        const d = App.formData(form);
-        if (!isNew) d.id = u.id;
-        try {
-          await App.busy(ev.currentTarget, () => api('user_save', { data: d }));
-          App.closeAll();
-          toast(isNew ? 'Account created' : 'Saved');
-          if (d.password) App.confirm('Password set', `Share these with ${esc(d.name)}:<br><br><b>Email:</b> ${esc(d.email)}<br><b>Password:</b> <code>${esc(d.password)}</code>`, { ok: 'Done' });
-          load();
-        } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
-      });
-    }
     ctx.refresh = () => load().catch(() => {});
     await load();
   }, { title: 'Staff setup', admin: true });
@@ -298,6 +311,7 @@
     const s = (await api('settings_get')).settings;
     const list = (k, label, help) => `<div class="field"><label for="se-${k}">${label}</label><textarea id="se-${k}" name="${k}" rows="6">${esc((s[k] || []).join('\n'))}</textarea><div class="help">${help}</div></div>`;
     const sm = s.smtp || {};
+    const rm = s.reminders;
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Settings</h1></div></div>
       <form class="card card-pad" id="se-co" style="margin-bottom:14px"><div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
@@ -323,7 +337,73 @@
             <div class="field"><label>From email</label><input type="email" name="from_email" value="${esc(sm.from_email || '')}" placeholder="portal@devtech.ng"></div></div>
           <div class="field"><label>From name</label><input name="from_name" value="${esc(sm.from_name || '')}"></div>
           <div class="actions"><button class="btn primary" type="submit">Save email settings</button><button class="btn" type="button" id="se-test"><i class="ti ti-mail-forward"></i>Send test email</button></div></form>
+        <form class="card card-pad" id="se-att"><h3 style="margin-bottom:4px">Attendance</h3>
+          <p class="muted small" style="margin-bottom:14px">Staff clock in and out on their phone with a selfie and a fresh GPS reading. Phones only share location on HTTPS.
+            School GPS points are set on each <a href="#/clients">client</a>.</p>
+          <div class="form-row"><div class="field"><label for="se-ws">Work starts at</label><input type="time" id="se-ws" name="work_start" value="${esc(s.work_start)}"></div>
+            <div class="field"><label for="se-we">Work ends at</label><input type="time" id="se-we" name="work_end" value="${esc(s.work_end)}"></div></div>
+          <div class="field"><label for="se-grace">Grace period (minutes)</label><input type="number" id="se-grace" name="late_grace" min="0" max="120" value="${esc(s.late_grace)}" style="max-width:160px">
+            <div class="help">Clock-ins after the start time plus this grace are marked late and need a reason. Leaving before the end time needs a reason too.</div></div>
+          <div class="field"><div class="label">Working days</div><div class="opts">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) =>
+            `<label class="opt"><input type="checkbox" data-multi="1" name="work_days" value="${i + 1}" ${s.work_days.includes(i + 1) ? 'checked' : ''}><span>${d}</span></label>`).join('')}</div>
+            <div class="help">A working day with no clock-in counts as absent in the attendance report.</div></div>
+          <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="require_signoff" ${s.require_signoff ? 'checked' : ''}><span>Jobs need the client's signature when completed (staff must give a reason if the client can't sign)</span></label>
+          <button class="btn primary" type="submit">Save attendance settings</button></form>
+        <form class="card card-pad" id="se-rem"><h3 style="margin-bottom:4px">Follow-up reminders</h3>
+          <p class="muted small" style="margin-bottom:14px">A daily email listing overdue, stalled, high-priority and unchecked jobs plus yesterday's lateness, so you can follow up before clients complain. Each staff member also gets their own list.</p>
+          ${rm.mail_enabled ? '' : '<div class="note-box warn" style="margin-bottom:12px">Email is turned off. Turn on email notifications above, or reminders only show inside the portal.</div>'}
+          <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="reminders_enabled" ${rm.enabled ? 'checked' : ''}><span>Send the daily follow-up email</span></label>
+          <div class="form-row"><div class="field"><label for="se-rt">Send at</label><input type="time" id="se-rt" name="reminder_time" value="${esc(rm.time)}"></div>
+            <div class="field"><label for="se-sd">Flag jobs with no update for (days)</label><input type="number" id="se-sd" name="stale_days" min="1" max="60" value="${esc(rm.stale_days)}"></div></div>
+          <div class="field"><label for="se-re">Also send to</label><textarea id="se-re" name="reminder_emails" rows="2" placeholder="operations@devtech.ng">${esc(rm.emails.join('\n'))}</textarea>
+            <div class="help">One email per line. All admins get it automatically.</div></div>
+          <div class="note-box small" style="margin-bottom:14px;white-space:normal"><b>Set up a cron job</b> (cPanel → Cron Jobs → Once per hour) so reminders go out on time:<br>
+            <code style="word-break:break-all">php /home/YOUR_CPANEL_USER/public_html${esc(location.pathname.replace(/[^/]*$/, ''))}cron.php</code> (adjust to your folder), or<br>
+            <code style="word-break:break-all">${esc(location.origin + location.pathname.replace(/[^/]*$/, ''))}cron.php?key=${esc(rm.cron_key)}</code><br>
+            Without it, reminders are sent the first time someone opens the portal after the send time.${rm.last_run ? ` Last digest: ${esc(fmtDate(rm.last_run))}.` : ''}</div>
+          <div class="actions"><button class="btn primary" type="submit">Save reminders</button><button class="btn" type="button" id="se-rtest"><i class="ti ti-mail-forward"></i>Send digest now</button></div></form>
+        <form class="card card-pad" id="se-faults"><h3 style="margin-bottom:4px">Maintenance faults</h3>
+          <p class="muted small" style="margin-bottom:14px">The device list and fault checklist staff see when they report maintenance and repair work.</p>
+          <div class="field"><label for="se-ft">Devices and faults</label><textarea id="se-ft" name="fault_types" rows="10">${esc(Object.entries(s.fault_types || {}).map(([dev, list]) => `${dev}: ${list.join('; ')}`).join('\n'))}</textarea>
+            <div class="help">One device per line: <b>Device: fault; fault; fault</b>.</div></div>
+          <button class="btn primary" type="submit">Save faults</button></form>
       </div>`;
+    $('#se-att', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = App.formData(e.target);
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: { work_start: d.work_start, work_end: d.work_end, late_grace: d.late_grace,
+          work_days: (d.work_days || []).map(Number), require_signoff: d.require_signoff } }));
+        Object.assign(App.cfg, { work_start: d.work_start, work_end: d.work_end, late_grace: +d.late_grace || 0 });
+        toast('Attendance settings saved');
+      } catch (err) { App.fail(err); }
+    });
+    $('#se-rem', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = App.formData(e.target);
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: { reminders_enabled: d.reminders_enabled, reminder_time: d.reminder_time, stale_days: d.stale_days,
+          reminder_emails: d.reminder_emails.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean) } }));
+        toast('Reminder settings saved');
+      } catch (err) { App.fail(err); }
+    });
+    $('#se-rtest', ctx.el).addEventListener('click', async (e) => {
+      try { const r = await App.busy(e.currentTarget, () => api('reminders_test', { data: {} })); toast(r.message); } catch (err) { App.fail(err); }
+    });
+    $('#se-faults', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const types = {};
+      for (const line of App.formData(e.target).fault_types.split('\n').map((x) => x.trim()).filter(Boolean)) {
+        const i = line.indexOf(':');
+        if (i < 1) { toast(`Can't read this line: "${line}". Use Device: fault; fault.`, true); return; }
+        types[line.slice(0, i).trim()] = line.slice(i + 1).split(';').map((x) => x.trim()).filter(Boolean);
+      }
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: { fault_types: types } }));
+        App.cfg = (await api('session')).config;
+        toast('Fault list saved');
+      } catch (err) { App.fail(err); }
+    });
     $('#se-co', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
       const d = App.formData(e.target);
@@ -355,42 +435,6 @@
       try { const r = await App.busy(e.currentTarget, () => api('smtp_test', { data: {} })); toast(r.message); } catch (err) { App.fail(err); }
     });
   }, { title: 'Settings', admin: true });
-
-  /* -------------------------------------------------------------- profile */
-  App.route('profile', async (ctx) => {
-    const u = App.user;
-    ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>Profile</h1></div><div class="actions"><button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button></div></div>
-      <div class="grid g2">
-        <form class="card card-pad" id="pf-form"><div style="display:flex;gap:12px;align-items:center;margin-bottom:16px"><div class="avatar" style="width:48px;height:48px;font-size:17px">${esc(App.initials(u.name))}</div>
-          <div><div style="font-weight:600;font-size:16px">${esc(u.name)}</div><div class="muted">${esc(u.email)}</div></div></div>
-          <div class="field"><label for="pf-p">Phone</label><input type="tel" id="pf-p" name="phone" value="${esc(u.phone || '')}"></div>
-          <div class="field"><label for="pf-l">My school / location</label><select id="pf-l" name="location">${App.opts(App.cfg.locations, u.location, { placeholder: 'None' })}</select><div class="help">Pre-fills your daily report.</div></div>
-          <button class="btn primary" type="submit">Save</button></form>
-        <form class="card card-pad" id="pw-form" novalidate><h3 style="margin-bottom:14px">Change password</h3>
-          <div class="field"><label for="pw-c">Current password</label><input type="password" id="pw-c" name="current" autocomplete="current-password"></div>
-          <div class="field"><label for="pw-n">New password</label><input type="password" id="pw-n" name="new" autocomplete="new-password" placeholder="At least 8 characters"></div>
-          <div class="field"><label for="pw-n2">Repeat new password</label><input type="password" id="pw-n2" name="new2" autocomplete="new-password"></div>
-          <button class="btn primary" type="submit">Change password</button></form>
-        <div class="card card-pad"><h3 style="margin-bottom:10px">Appearance</h3><button class="btn" id="pf-theme"><i class="ti ti-moon"></i>Toggle dark mode</button></div>
-      </div>`;
-    $('#pf-out', ctx.el).addEventListener('click', App.logout);
-    $('#pf-theme', ctx.el).addEventListener('click', App.toggleTheme);
-    $('#pf-form', ctx.el).addEventListener('submit', async (e) => {
-      e.preventDefault();
-      try { const r = await App.busy(e.submitter, () => api('profile_save', { data: App.formData(e.target) })); App.user = { ...App.user, ...r.user }; toast('Profile saved'); } catch (err) { App.fail(err); }
-    });
-    $('#pw-form', ctx.el).addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const d = App.formData(e.target);
-      const errs = {};
-      if (!d.current) errs.current = 'Enter your current password.';
-      if ((d.new || '').length < 8) errs.new = 'Use at least 8 characters.';
-      if (d.new !== d.new2) errs.new2 = 'The passwords don\'t match.';
-      if (Object.keys(errs).length) { App.showErrors(e.target, errs); return; }
-      try { await App.busy(e.submitter, () => api('password_change', { data: d })); e.target.reset(); App.showErrors(e.target, null); toast('Password changed'); } catch (err) { App.fail(err); }
-    });
-  }, { title: 'Profile' });
 
   App.start();
 })();

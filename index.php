@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/inc/bootstrap.php';
 start_session();
+ensure_schema();
 $v = fn($f) => $f . '?v=' . @filemtime(__DIR__ . '/' . $f);
 $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 ?><!doctype html>
@@ -29,6 +30,9 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <script src="<?= $v('assets/js/core.js') ?>"></script>
 <script src="<?= $v('assets/js/reports.js') ?>"></script>
 <script src="<?= $v('assets/js/wallet.js') ?>"></script>
+<script src="<?= $v('assets/js/jobs.js') ?>"></script>
+<script src="<?= $v('assets/js/people.js') ?>"></script>
+<script src="<?= $v('assets/js/clients.js') ?>"></script>
 <script src="<?= $v('assets/js/admin.js') ?>"></script>
 </body>
 </html>

@@ -10,7 +10,7 @@ if (PHP_VERSION_ID < 80100) {
     exit("<div style=\"font-family:Arial,sans-serif;max-width:560px;margin:60px auto;padding:20px;border:1px solid #f0c0c0;border-radius:10px;background:#fff6f6\"><h2 style=\"margin-top:0\">PHP 8.1 or newer is required</h2><p>This server is running PHP " . PHP_VERSION . ". In cPanel, open <b>MultiPHP Manager</b> (or <b>Select PHP Version</b>), choose PHP 8.1 or newer for this domain, then reload this page.</p></div>");
 }
 
-require __DIR__ . '/inc/tables.php';
+require_once __DIR__ . '/inc/tables.php';
 
 $configFile = __DIR__ . '/config.php';
 $errors = [];
@@ -22,9 +22,7 @@ if (is_file($configFile)) {
         $c = $cfg['db'];
         $pdo = new PDO("mysql:host={$c['host']};port={$c['port']};dbname={$c['name']};charset=utf8mb4", $c['user'], $c['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         // Re-running keeps tables in sync with new versions (CREATE IF NOT EXISTS).
-        foreach (table_sql() as $sql) {
-            $pdo->exec($sql);
-        }
+        apply_schema($pdo);
         $hasAdmin = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='admin'")->fetchColumn() > 0;
     } catch (Throwable $e) {
         $hasAdmin = false;
@@ -59,9 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         try {
             $pdo = new PDO("mysql:host={$v['db_host']};port=" . (int)$v['db_port'] . ";dbname={$v['db_name']};charset=utf8mb4", $v['db_user'], $v['db_pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-            foreach (table_sql() as $sql) {
-                $pdo->exec($sql);
-            }
+            apply_schema($pdo);
             $sample = require __DIR__ . '/config.sample.php';
             $sample['app_name'] = $v['app_name'];
             $sample['company'] = $v['company'];

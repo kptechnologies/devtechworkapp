@@ -42,7 +42,15 @@ function act_dashboard(array $in, array $me): void
             FROM reports WHERE report_date BETWEEN ? AND ?", [$from, $to])->fetch();
     $repSeries = q("SELECT $bucketRep AS b, finished, COUNT(*) AS n FROM reports WHERE report_date BETWEEN ? AND ? GROUP BY b, finished ORDER BY b", [$from, $to])->fetchAll();
     $byLocation = q("SELECT location AS label, COUNT(*) AS value FROM reports WHERE report_date BETWEEN ? AND ? GROUP BY location ORDER BY value DESC", [$from, $to])->fetchAll();
-    $byWorkType = q("SELECT work_type AS label, COUNT(*) AS value FROM reports WHERE report_date BETWEEN ? AND ? GROUP BY work_type ORDER BY value DESC", [$from, $to])->fetchAll();
+    // A report can list several duties ("Installation, Maintenance & repair"): count each one.
+    $duties = [];
+    foreach (q('SELECT work_type, COUNT(*) AS n FROM reports WHERE report_date BETWEEN ? AND ? GROUP BY work_type', [$from, $to])->fetchAll() as $w) {
+        foreach ($w['work_type'] === '' ? [''] : explode(', ', $w['work_type']) as $duty) {
+            $duties[$duty] = ($duties[$duty] ?? 0) + (int)$w['n'];
+        }
+    }
+    arsort($duties);
+    $byWorkType = array_map(fn($k, $v) => ['label' => (string)$k, 'value' => $v], array_keys($duties), $duties);
     // Faulty laptops: latest report per location in range.
     $faulty = q("SELECT r.location, r.laptops_faulty, r.laptops_total, r.report_date FROM reports r
             JOIN (SELECT location, MAX(id) AS id FROM reports WHERE report_date BETWEEN ? AND ? AND location <> '' GROUP BY location) x ON x.id = r.id
@@ -78,6 +86,14 @@ function act_dashboard(array $in, array $me): void
         'by_work_type' => $byWorkType,
         'faulty_by_location' => $faulty,
         'missing_today' => $missing,
+        'attendance' => attendance_today_summary(),
+        'jobs' => [
+            'active' => (int)q("SELECT COUNT(*) FROM jobs WHERE status IN ('open','in_progress','returned')")->fetchColumn(),
+            'to_check' => (int)q("SELECT COUNT(*) FROM jobs WHERE status = 'awaiting_check'")->fetchColumn(),
+            'requested' => (int)q("SELECT COUNT(*) FROM jobs WHERE status = 'requested'")->fetchColumn(),
+            'overdue' => (int)q("SELECT COUNT(*) FROM jobs WHERE due_date < ? AND status IN ('open','in_progress','returned','requested')", [today()])->fetchColumn(),
+            'done' => (int)q("SELECT COUNT(*) FROM jobs WHERE status = 'done' AND DATE(verified_at) BETWEEN ? AND ?", [$from, $to])->fetchColumn(),
+        ],
         'review' => $review,
         'requests' => $requests,
     ]);
@@ -171,6 +187,13 @@ function act_settings_get(array $in, array $me): void
         'expense_categories' => setting('expense_categories'),
         'credit_types' => setting('credit_types'),
         'daily_allowance_default' => (float)setting('daily_allowance_default'),
+        'work_start' => work_start(),
+        'work_end' => work_end(),
+        'late_grace' => late_grace(),
+        'work_days' => work_days(),
+        'fault_types' => fault_types(),
+        'require_signoff' => setting('require_signoff') !== false,
+        'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
         'smtp' => $smtp,
     ]]);
 }
@@ -198,6 +221,66 @@ function act_settings_save(array $in, array $me): void
     if (isset($in['company_address'])) {
         save_setting('company_address', str_in($in['company_address'], 300));
     }
+    foreach (['work_start' => 'work start time', 'work_end' => 'closing time', 'reminder_time' => 'reminder time'] as $k => $label) {
+        if (isset($in[$k])) {
+            if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string)$in[$k])) {
+                fail("Enter the $label as HH:MM.");
+            }
+            save_setting($k, $in[$k]);
+        }
+    }
+    if (isset($in['late_grace'])) {
+        save_setting('late_grace', max(0, min(120, (int)$in['late_grace'])));
+    }
+    if (isset($in['work_days'])) {
+        $days = array_values(array_intersect([1, 2, 3, 4, 5, 6, 7], array_map('intval', (array)$in['work_days'])));
+        if (!$days) {
+            fail('Tick at least one working day.');
+        }
+        save_setting('work_days', $days);
+    }
+    if (isset($in['stale_days'])) {
+        save_setting('stale_days', max(1, min(60, (int)$in['stale_days'])));
+    }
+    foreach (['reminders_enabled', 'require_signoff'] as $k) {
+        if (isset($in[$k])) {
+            save_setting($k, (bool)$in[$k]);
+        }
+    }
+    if (isset($in['reminder_emails'])) {
+        $emails = array_values(array_unique(array_filter(array_map(fn($x) => strtolower(str_in($x, 190)), (array)$in['reminder_emails']), 'strlen')));
+        foreach ($emails as $e) {
+            if (!filter_var($e, FILTER_VALIDATE_EMAIL)) {
+                fail("\"$e\" isn't a valid email address.");
+            }
+        }
+        save_setting('reminder_emails', $emails);
+    }
+    if (isset($in['site_coords']) && is_array($in['site_coords'])) {
+        $sites = [];
+        foreach ($in['site_coords'] as $name => $ll) {
+            $name = str_in($name, 120);
+            if ($name === '' || !is_array($ll) || count($ll) !== 2 || !is_numeric($ll[0]) || !is_numeric($ll[1]) || abs((float)$ll[0]) > 90 || abs((float)$ll[1]) > 180) {
+                fail('Each site needs a name and a valid latitude, longitude.');
+            }
+            $sites[$name] = [(float)$ll[0], (float)$ll[1]];
+        }
+        save_setting('site_coords', $sites);
+    }
+    if (isset($in['fault_types']) && is_array($in['fault_types'])) {
+        $types = [];
+        foreach ($in['fault_types'] as $device => $faults) {
+            $device = str_in($device, 60);
+            $faults = array_values(array_unique(array_filter(array_map(fn($x) => str_in($x, 120), (array)$faults), 'strlen')));
+            if ($device !== '' && $faults) {
+                $types[$device] = $faults;
+            }
+        }
+        if (!$types) {
+            fail('Add at least one device with its faults.');
+        }
+        save_setting('fault_types', $types);
+    }
     if (isset($in['daily_allowance_default'])) {
         save_setting('daily_allowance_default', money_in($in['daily_allowance_default']));
     }
@@ -217,6 +300,17 @@ function act_settings_save(array $in, array $me): void
     }
     audit('settings_save', 'settings', null, array_keys($in));
     json_out(['ok' => true]);
+}
+
+/** Secret for calling cron.php from a URL, created on first use. */
+function cron_key(): string
+{
+    $k = (string)setting('cron_key');
+    if ($k === '') {
+        $k = bin2hex(random_bytes(16));
+        save_setting('cron_key', $k);
+    }
+    return $k;
 }
 
 function act_smtp_test(array $in, array $me): void

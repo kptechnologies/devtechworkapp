@@ -1,0 +1,42 @@
+# Uploads the portal to cPanel (staff.devtech.ng) over FTP whenever main changes.
+# Needs repository secrets: FTP_SERVER, FTP_USERNAME, FTP_PASSWORD.
+# Optional repository variable FTP_SERVER_DIR (default: ./, the FTP account's home, which is the staff.devtech.ng folder).
+name: Deploy to cPanel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cpanel
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PHP syntax
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Upload over FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          server-dir: ${{ vars.FTP_SERVER_DIR || './' }}
+          # Live settings (incl. the root .htaccess with HTTPS forced), receipts/photos and the installer stay untouched.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            .htaccess
+            config.php
+            config.sample.php
+            install.php
+            README.md
+            uploads/**

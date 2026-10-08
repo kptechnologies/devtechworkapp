@@ -1,5 +1,8 @@
 <?php
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
+
+/** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
+const SCHEMA_VERSION = 3;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -12,6 +15,15 @@ function table_sql(): array
             password_hash VARCHAR(255) NULL,
             role VARCHAR(10) NOT NULL DEFAULT 'staff',
             location VARCHAR(120) NOT NULL DEFAULT '',
+            job_title VARCHAR(120) NOT NULL DEFAULT '',
+            duties TEXT NULL,
+            address VARCHAR(300) NOT NULL DEFAULT '',
+            next_of_kin VARCHAR(120) NOT NULL DEFAULT '',
+            next_of_kin_phone VARCHAR(40) NOT NULL DEFAULT '',
+            bank_name VARCHAR(80) NOT NULL DEFAULT '',
+            bank_account VARCHAR(40) NOT NULL DEFAULT '',
+            start_date DATE NULL,
+            photo_id INT UNSIGNED NULL,
             active TINYINT(1) NOT NULL DEFAULT 1,
             failed_logins INT NOT NULL DEFAULT 0,
             locked_until DATETIME NULL,
@@ -116,9 +128,165 @@ function table_sql(): array
             created_at DATETIME NOT NULL,
             KEY idx_entity (entity, entity_id)
         ) $t",
+        "CREATE TABLE IF NOT EXISTS jobs (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(190) NOT NULL,
+            client_type VARCHAR(10) NOT NULL DEFAULT 'school',
+            client_name VARCHAR(190) NOT NULL DEFAULT '',
+            location VARCHAR(190) NOT NULL DEFAULT '',
+            contact_name VARCHAR(120) NOT NULL DEFAULT '',
+            contact_phone VARCHAR(40) NOT NULL DEFAULT '',
+            description TEXT NULL,
+            priority VARCHAR(10) NOT NULL DEFAULT 'normal',
+            due_date DATE NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'open',
+            created_by INT UNSIGNED NULL,
+            source_report_id INT UNSIGNED NULL,
+            completion_note TEXT NULL,
+            completed_by INT UNSIGNED NULL,
+            completed_at DATETIME NULL,
+            verified_by INT UNSIGNED NULL,
+            verified_at DATETIME NULL,
+            review_note TEXT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NULL,
+            KEY idx_status (status),
+            KEY idx_due (due_date)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS job_assignees (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            job_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            assigned_by INT UNSIGNED NULL,
+            assigned_at DATETIME NOT NULL,
+            removed_at DATETIME NULL,
+            KEY idx_job (job_id),
+            KEY idx_user (user_id, removed_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS job_updates (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            job_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NULL,
+            kind VARCHAR(12) NOT NULL DEFAULT 'comment',
+            report_id INT UNSIGNED NULL,
+            body TEXT NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_job (job_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS tools (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            category VARCHAR(80) NOT NULL DEFAULT '',
+            serial_no VARCHAR(120) NOT NULL DEFAULT '',
+            tag_code VARCHAR(60) NOT NULL DEFAULT '',
+            `condition` VARCHAR(10) NOT NULL DEFAULT 'good',
+            value DECIMAL(12,2) NOT NULL DEFAULT 0,
+            purchase_date DATE NULL,
+            notes TEXT NULL,
+            holder_id INT UNSIGNED NULL,
+            issued_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_holder (holder_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS tool_moves (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            tool_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NULL,
+            action VARCHAR(10) NOT NULL,
+            `condition` VARCHAR(10) NOT NULL DEFAULT '',
+            note TEXT NULL,
+            by_user INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_tool (tool_id),
+            KEY idx_user (user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS attendance (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            work_date DATE NOT NULL,
+            in_at DATETIME NOT NULL,
+            in_lat DECIMAL(10,7) NULL,
+            in_lng DECIMAL(10,7) NULL,
+            in_acc INT NULL,
+            in_site VARCHAR(120) NOT NULL DEFAULT '',
+            in_dist INT NULL,
+            out_at DATETIME NULL,
+            out_lat DECIMAL(10,7) NULL,
+            out_lng DECIMAL(10,7) NULL,
+            out_acc INT NULL,
+            out_site VARCHAR(120) NOT NULL DEFAULT '',
+            out_dist INT NULL,
+            note TEXT NULL,
+            source VARCHAR(10) NOT NULL DEFAULT 'app',
+            edited_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_user_date (user_id, work_date),
+            KEY idx_date (work_date)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS clients (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(190) NOT NULL UNIQUE,
+            type VARCHAR(10) NOT NULL DEFAULT 'school',
+            address VARCHAR(300) NOT NULL DEFAULT '',
+            area VARCHAR(120) NOT NULL DEFAULT '',
+            contact_name VARCHAR(120) NOT NULL DEFAULT '',
+            contact_phone VARCHAR(40) NOT NULL DEFAULT '',
+            contact_email VARCHAR(190) NOT NULL DEFAULT '',
+            lat DECIMAL(10,7) NULL,
+            lng DECIMAL(10,7) NULL,
+            notes TEXT NULL,
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL
+        ) $t",
         "CREATE TABLE IF NOT EXISTS settings (
             k VARCHAR(60) PRIMARY KEY,
             v MEDIUMTEXT NOT NULL
         ) $t",
     ];
+}
+
+/** Columns added after the first release: [table, column, definition]. Added by ensure_schema() when missing. */
+function column_sql(): array
+{
+    return [
+        ['users', 'job_title', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['users', 'duties', 'TEXT NULL'],
+        ['users', 'address', "VARCHAR(300) NOT NULL DEFAULT ''"],
+        ['users', 'next_of_kin', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['users', 'next_of_kin_phone', "VARCHAR(40) NOT NULL DEFAULT ''"],
+        ['users', 'bank_name', "VARCHAR(80) NOT NULL DEFAULT ''"],
+        ['users', 'bank_account', "VARCHAR(40) NOT NULL DEFAULT ''"],
+        ['users', 'start_date', 'DATE NULL'],
+        ['users', 'photo_id', 'INT UNSIGNED NULL'],
+        // v3: priorities, client sign-off, strict attendance
+        ['reports', 'priority', "VARCHAR(10) NOT NULL DEFAULT ''"],
+        ['jobs', 'client_id', 'INT UNSIGNED NULL'],
+        ['jobs', 'signoff_name', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['jobs', 'signoff_phone', "VARCHAR(40) NOT NULL DEFAULT ''"],
+        ['jobs', 'signoff_at', 'DATETIME NULL'],
+        ['jobs', 'signoff_skipped', "VARCHAR(500) NOT NULL DEFAULT ''"],
+        ['attendance', 'in_gps_ts', 'DATETIME NULL'],
+        ['attendance', 'out_gps_ts', 'DATETIME NULL'],
+        ['attendance', 'in_skew', 'INT NULL'],
+        ['attendance', 'out_skew', 'INT NULL'],
+        ['attendance', 'in_reason', "VARCHAR(500) NOT NULL DEFAULT ''"],
+        ['attendance', 'out_reason', "VARCHAR(500) NOT NULL DEFAULT ''"],
+        ['attendance', 'flags', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['attendance', 'out_missed', 'TINYINT(1) NOT NULL DEFAULT 0'],
+    ];
+}
+
+/** Create missing tables and columns on any database connection. */
+function apply_schema(PDO $pdo): void
+{
+    foreach (table_sql() as $sql) {
+        $pdo->exec($sql);
+    }
+    $check = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    foreach (column_sql() as [$table, $col, $def]) {
+        $check->execute([$table, $col]);
+        if (!(int)$check->fetchColumn()) {
+            $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$col` $def");
+        }
+    }
 }
