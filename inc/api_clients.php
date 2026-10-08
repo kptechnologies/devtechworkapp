@@ -44,6 +44,19 @@ function pending_faults_by_location(?string $location = null): array
     return $out;
 }
 
+/** Staff assigned to this school, as [id => row with their school list]. */
+function client_staff(string $name): array
+{
+    $out = [];
+    foreach (q("SELECT id, name, role, location, schools, active FROM users ORDER BY name")->fetchAll() as $u) {
+        $list = user_schools($u);
+        if (in_array(mb_strtolower($name), array_map('mb_strtolower', $list), true)) {
+            $out[(int)$u['id']] = ['id' => (int)$u['id'], 'name' => $u['name'], 'role' => $u['role'], 'active' => (int)$u['active'], 'schools' => $list];
+        }
+    }
+    return $out;
+}
+
 function act_clients_list(array $in, array $me): void
 {
     require_admin();
@@ -100,7 +113,7 @@ function act_client_get(array $in, array $me): void
             $devices[] = $d + ['report_id' => (int)$r['id'], 'report_date' => $r['report_date'], 'user_name' => $r['user_name']];
         }
     }
-    json_out(['ok' => true, 'client' => $c, 'jobs' => $jobs, 'signoffs' => $signoffs, 'reports' => $reports, 'devices' => array_slice($devices, 0, 200)]);
+    json_out(['ok' => true, 'client' => $c, 'staff' => array_values(client_staff($c['name'])), 'jobs' => $jobs, 'signoffs' => $signoffs, 'reports' => $reports, 'devices' => array_slice($devices, 0, 200)]);
 }
 
 function act_client_save(array $in, array $me): void
@@ -144,6 +157,10 @@ function act_client_save(array $in, array $me): void
         if ($old['name'] !== $v['name']) {
             // Keep jobs showing the current name.
             q('UPDATE jobs SET client_name = ? WHERE client_id = ?', [$v['name'], $id]);
+            // ...and staff assigned to it.
+            foreach (client_staff($old['name']) as $uid => $u) {
+                save_user_schools($uid, clean_schools(array_map(fn($s) => mb_strtolower($s) === mb_strtolower($old['name']) ? $v['name'] : $s, $u['schools'])));
+            }
         }
         audit('client_update', 'client', $id);
     } else {
@@ -155,4 +172,35 @@ function act_client_save(array $in, array $me): void
     db()->commit();
     touch_change();
     json_out(['ok' => true, 'id' => $id]);
+}
+
+/** Set exactly which staff work at this school; their other schools are kept. */
+function act_client_staff_save(array $in, array $me): void
+{
+    require_admin();
+    $c = q('SELECT id, name FROM clients WHERE id = ?', [(int)($in['id'] ?? 0)])->fetch();
+    if (!$c) {
+        fail('Client not found.', 404);
+    }
+    $want = array_map('intval', (array)($in['user_ids'] ?? []));
+    $current = client_staff($c['name']);
+    db()->beginTransaction();
+    foreach ($current as $uid => $u) {
+        if (!in_array($uid, $want, true)) {
+            save_user_schools($uid, array_values(array_filter($u['schools'], fn($s) => mb_strtolower($s) !== mb_strtolower($c['name']))));
+        }
+    }
+    foreach ($want as $uid) {
+        if (isset($current[$uid])) {
+            continue;
+        }
+        $u = q('SELECT id, location, schools FROM users WHERE id = ?', [$uid])->fetch();
+        if ($u) {
+            save_user_schools($uid, clean_schools(array_merge(user_schools($u), [$c['name']])));
+        }
+    }
+    audit('client_staff', 'client', (int)$c['id'], ['user_ids' => $want]);
+    db()->commit();
+    touch_change();
+    json_out(['ok' => true, 'staff' => array_values(client_staff($c['name']))]);
 }

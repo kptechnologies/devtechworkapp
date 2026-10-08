@@ -187,7 +187,8 @@
     } else {
       data = App.store.get(draftKey, null) || {};
       if (!data.report_date) data.report_date = App.cfg.today;
-      if (!data.location && App.user.location) data.location = App.user.location;
+      // Pre-fill the school only when they work at just one.
+      if (!data.location && App.user.schools?.length === 1) data.location = App.user.schools[0];
       if (!data.duties && App.user.duties?.length) data.duties = App.user.duties.slice();
     }
     // Open job orders to pick from, and today's clock-in to pre-fill the hours.

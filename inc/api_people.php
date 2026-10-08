@@ -2,7 +2,7 @@
 /* Staff profiles, work tools register, attendance (clock in/out with GPS + selfie) */
 
 const TOOL_CONDITIONS = ['good', 'fair', 'faulty', 'lost', 'retired'];
-const PROFILE_COLS = 'id, name, email, phone, role, location, job_title, duties, address, next_of_kin, next_of_kin_phone,
+const PROFILE_COLS = 'id, name, email, phone, role, location, schools, job_title, duties, address, next_of_kin, next_of_kin_phone,
     bank_name, bank_account, start_date, photo_id, active, last_login, created_at';
 
 /* ---------------------------------------------------------------- profile */
@@ -15,6 +15,7 @@ function profile_user(int $id): array
     }
     $u['id'] = (int)$u['id'];
     $u['duties'] = json_decode((string)$u['duties'], true) ?: [];
+    $u['schools'] = user_schools($u);
     return $u;
 }
 
@@ -56,14 +57,15 @@ function act_staff_profile_save(array $in, array $me): void
     ];
     if ($admin) {
         $v['job_title'] = str_in($in['job_title'] ?? '', 120);
-        $v['location'] = str_in($in['location'] ?? '', 120);
         $v['start_date'] = valid_date($in['start_date'] ?? null) ? $in['start_date'] : null;
         $v['duties'] = json_encode(array_values(array_intersect(DUTIES, (array)($in['duties'] ?? []))), JSON_UNESCAPED_UNICODE);
-    } elseif (isset($in['location'])) {
-        $v['location'] = str_in($in['location'], 120);
     }
     $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($v)));
     q("UPDATE users SET $set WHERE id = ?", array_merge(array_values($v), [$uid]));
+    if (isset($in['schools']) || isset($in['location'])) {
+        save_user_schools($uid, clean_schools($in['schools'] ?? [$in['location']]));
+        $v['schools'] = true;
+    }
     audit('profile_update', 'user', $uid, array_keys($v));
     touch_change();
     json_out(['ok' => true, 'user' => profile_user($uid)]);

@@ -494,6 +494,13 @@
     await load();
   }
 
+  /** Tick-boxes for the schools a staff member works at (several allowed). */
+  App.schoolsField = (selected = []) => {
+    const list = App.cfg.locations.concat(selected.filter((s) => !App.cfg.locations.includes(s)));
+    return `<div class="field"><div class="label">Schools / locations</div><div class="opts">${list.map((s) => `<label class="opt"><input type="checkbox" data-multi="1" name="schools" value="${esc(s)}" ${selected.includes(s) ? 'checked' : ''}>
+      <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s)}</span></label>`).join('')}</div><div class="help">Tick every school they work at. Add new schools under Clients.</div></div>`;
+  };
+
   function tabHtml(tab, p, admin, self) {
     const u = p.user;
     if (tab === 'details') {
@@ -502,8 +509,8 @@
         <form class="card card-pad" id="pd-form"><h3 style="margin-bottom:14px">Personal details</h3>
           ${admin ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
             <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>` : ''}
-          <div class="form-row">${f('phone', 'Phone', u.phone, 'type="tel"')}
-            <div class="field"><label for="pd-loc">School / location</label><select id="pd-loc" name="location">${App.opts(App.cfg.locations.concat(u.location && !App.cfg.locations.includes(u.location) ? [u.location] : []), u.location, { placeholder: 'None' })}</select></div></div>
+          ${f('phone', 'Phone', u.phone, 'type="tel"')}
+          ${App.schoolsField(u.schools)}
           ${f('address', 'Home address', u.address)}
           <div class="form-row">${f('next_of_kin', 'Next of kin', u.next_of_kin)}${f('next_of_kin_phone', 'Next of kin phone', u.next_of_kin_phone, 'type="tel"')}</div>
           <div class="form-row">${f('bank_name', 'Bank', u.bank_name)}${f('bank_account', 'Account number', u.bank_account, 'inputmode="numeric"')}</div>
@@ -562,7 +569,7 @@
         if (admin && !d.duties) d.duties = [];
         try {
           const r = await App.busy(e.submitter, () => api('staff_profile_save', { data: d }));
-          if (self) App.user = { ...App.user, phone: r.user.phone, location: r.user.location, duties: r.user.duties, job_title: r.user.job_title };
+          if (self) App.user = { ...App.user, phone: r.user.phone, location: r.user.location, schools: r.user.schools, duties: r.user.duties, job_title: r.user.job_title };
           toast('Details saved');
           reload();
         } catch (err) { App.showErrors(e.target, err.fields); App.fail(err); }

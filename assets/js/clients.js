@@ -61,6 +61,11 @@
           <div class="actions">${mapUrl(c) ? `<a class="btn" href="${esc(mapUrl(c))}" target="_blank" rel="noopener"><i class="ti ti-map-pin"></i>Map</a>` : ''}
             <button class="btn" id="cd-job"><i class="ti ti-plus"></i>New job</button><button class="btn primary" id="cd-edit"><i class="ti ti-edit"></i>Edit</button></div>
         </div>
+        <div class="card card-pad" style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <div style="font-weight:600"><i class="ti ti-users"></i> Assigned staff</div>
+          <div class="chips" style="flex:1;min-width:160px">${r.staff.length ? r.staff.map((s) => `<a class="chip-user" href="#/staff/${s.id}" style="${s.active ? '' : 'opacity:.55'}"><span class="avatar xs">${esc(App.initials(s.name))}</span>${esc(s.name)}</a>`).join('')
+            : '<span class="faint small">Nobody assigned yet</span>'}</div>
+          <button class="btn sm" id="cd-staff"><i class="ti ti-user-plus"></i>Assign staff</button></div>
         <div class="grid g4" style="margin-bottom:14px">
           <div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-clipboard-list"></i></div><div class="label">Open jobs</div><div class="value">${open.length}</div><div class="sub">${open.filter((j) => j.overdue).length} overdue</div></div>
           <div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-circle-check"></i></div><div class="label">Jobs done</div><div class="value">${r.jobs.filter((j) => j.status === 'done').length}</div><div class="sub">${r.signoffs.filter((s) => s.signoff_name).length} signed by client</div></div>
@@ -101,6 +106,7 @@
       };
       $$('#cd-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; draw(); }));
       $('#cd-edit', ctx.el).addEventListener('click', () => editClient(c, () => load()));
+      $('#cd-staff', ctx.el).addEventListener('click', () => assignStaff(c, r.staff, () => load()).catch(App.fail));
       $('#cd-job', ctx.el).addEventListener('click', () => App.editJob(null, { client_name: c.name, client_type: c.type, location: [c.address, c.area].filter(Boolean).join(', '),
         contact_name: c.contact_name, contact_phone: c.contact_phone }));
       App.setTitle(c.name);
@@ -109,6 +115,35 @@
     ctx.refresh = () => load().catch(() => {});
     await load();
   }, { title: 'Client', nav: 'clients', admin: true, live: true });
+
+  /** Tick the staff who work at this school; their other schools are kept. */
+  async function assignStaff(c, current, done) {
+    const ids = new Set(current.map((s) => s.id));
+    const staff = (await api('users_list')).items.filter((u) => u.active || ids.has(u.id));
+    const here = c.name.toLowerCase();
+    const el = App.modal(`Staff at ${esc(c.name)}`, `
+      <p class="muted" style="margin-bottom:10px">Tick everyone who works here. Untick someone to take them off this school. Their other schools stay as they are.</p>
+      <input type="search" id="cs-q" placeholder="Search staff…" style="margin-bottom:10px">
+      <div class="opts col" id="cs-list">${staff.map((s) => {
+        const other = (s.schools || []).filter((x) => x.toLowerCase() !== here);
+        return `<label class="opt" data-name="${esc(s.name.toLowerCase())}"><input type="checkbox" value="${s.id}" ${ids.has(s.id) ? 'checked' : ''}>
+          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}${other.length ? ` <span class="faint small">· also ${esc(other.join(', '))}</span>` : ''}${s.role === 'admin' ? ' <span class="faint small">(admin)</span>' : ''}</span></label>`;
+      }).join('')}</div>`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="cs-ok">Save</button>');
+    $('#cs-q', el).addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      $$('#cs-list .opt', el).forEach((o) => o.classList.toggle('hide', q && !o.dataset.name.includes(q)));
+    });
+    $('#cs-ok', el).addEventListener('click', async (e) => {
+      const userIds = $$('#cs-list input:checked', el).map((x) => +x.value);
+      try {
+        await App.busy(e.currentTarget, () => api('client_staff_save', { data: { id: c.id, user_ids: userIds } }));
+        App.closeTop();
+        toast('Staff saved');
+        done && done();
+      } catch (err) { App.fail(err); }
+    });
+  }
 
   function editClient(c, done) {
     const isNew = !c;

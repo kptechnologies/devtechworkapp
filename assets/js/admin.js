@@ -170,13 +170,13 @@
   /** Account modal: name, email, role, active, password. */
   function editUser(u, onSaved) {
     const isNew = !u;
-    u = u || { name: '', email: '', phone: '', location: '', role: 'staff', active: 1 };
+    u = u || { name: '', email: '', phone: '', schools: [], role: 'staff', active: 1 };
     const el = App.modal(isNew ? 'Add staff' : `Edit ${esc(u.name)}`, `
       <form id="us-form" novalidate>
         <div class="form-row"><div class="field"><label for="us-n">Full name <span class="req">*</span></label><input id="us-n" name="name" value="${esc(u.name)}" autofocus></div>
           <div class="field"><label for="us-e">Email <span class="req">*</span></label><input type="email" id="us-e" name="email" value="${esc(u.email)}" placeholder="name@devtech.ng"></div></div>
-        <div class="form-row"><div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
-          <div class="field"><label for="us-l">Assigned school / location</label><select id="us-l" name="location">${App.opts(App.cfg.locations.concat(u.location && !App.cfg.locations.includes(u.location) ? [u.location] : []), u.location, { placeholder: 'None' })}</select></div></div>
+        <div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
+        ${App.schoolsField(u.schools || [])}
         <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
           <label class="opt"><input type="radio" name="role" value="staff" ${u.role !== 'admin' ? 'checked' : ''}><span>Staff</span></label>
           <label class="opt"><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''}><span>Admin</span></label></div></div>

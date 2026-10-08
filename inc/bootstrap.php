@@ -92,6 +92,38 @@ function location_options(): array
     return array_merge($head, $extra, $tail);
 }
 
+/** Schools a staff member is assigned to. Rows saved before v4 only have the single `location` text. */
+function user_schools(array $u): array
+{
+    $list = json_decode((string)($u['schools'] ?? ''), true);
+    if (is_array($list)) {
+        return array_values(array_filter($list, 'is_string'));
+    }
+    return ($u['location'] ?? '') !== '' ? [$u['location']] : [];
+}
+
+/** Trimmed, de-duplicated school names from a form. */
+function clean_schools($in): array
+{
+    $out = [];
+    $seen = [];
+    foreach ((array)$in as $s) {
+        $s = mb_substr(trim((string)$s), 0, 190);
+        if ($s !== '' && !in_array(mb_strtolower($s), $seen, true)) {
+            $out[] = $s;
+            $seen[] = mb_strtolower($s);
+        }
+    }
+    return array_slice($out, 0, 30);
+}
+
+/** Save a staff member's schools; `location` keeps a readable copy ("A, B") for lists and exports. */
+function save_user_schools(int $uid, array $schools): void
+{
+    q('UPDATE users SET schools = ?, location = ? WHERE id = ?',
+        [json_encode(array_values($schools), JSON_UNESCAPED_UNICODE), mb_substr(implode(', ', $schools), 0, 500), $uid]);
+}
+
 function save_setting(string $key, $value): void
 {
     q('INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)', [$key, json_encode($value, JSON_UNESCAPED_UNICODE)]);
@@ -129,10 +161,11 @@ function current_user(bool $refresh = false): ?array
     }
     $user = null;
     if (!empty($_SESSION['uid'])) {
-        $r = q('SELECT id, name, email, phone, role, location, job_title, duties, active FROM users WHERE id = ?', [$_SESSION['uid']])->fetch();
+        $r = q('SELECT id, name, email, phone, role, location, schools, job_title, duties, active FROM users WHERE id = ?', [$_SESSION['uid']])->fetch();
         if ($r && (int)$r['active'] === 1) {
             $r['id'] = (int)$r['id'];
             $r['duties'] = json_decode((string)$r['duties'], true) ?: [];
+            $r['schools'] = user_schools($r);
             $user = $r;
         }
     }
@@ -217,6 +250,10 @@ function ensure_schema(): void
     apply_schema(db());
     if ($from < 3) {
         seed_clients();
+    }
+    if ($from < 4) {
+        // Room for several school names in the display copy.
+        q("ALTER TABLE users MODIFY location VARCHAR(500) NOT NULL DEFAULT ''");
     }
     save_setting('_schema_version', SCHEMA_VERSION);
 }

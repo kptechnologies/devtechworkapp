@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -14,7 +14,8 @@ function table_sql(): array
             phone VARCHAR(40) NOT NULL DEFAULT '',
             password_hash VARCHAR(255) NULL,
             role VARCHAR(10) NOT NULL DEFAULT 'staff',
-            location VARCHAR(120) NOT NULL DEFAULT '',
+            location VARCHAR(500) NOT NULL DEFAULT '',
+            schools TEXT NULL,
             job_title VARCHAR(120) NOT NULL DEFAULT '',
             duties TEXT NULL,
             address VARCHAR(300) NOT NULL DEFAULT '',
@@ -273,6 +274,8 @@ function column_sql(): array
         ['attendance', 'out_reason', "VARCHAR(500) NOT NULL DEFAULT ''"],
         ['attendance', 'flags', "VARCHAR(120) NOT NULL DEFAULT ''"],
         ['attendance', 'out_missed', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        // v4: staff can be assigned to several schools
+        ['users', 'schools', 'TEXT NULL'],
     ];
 }
 

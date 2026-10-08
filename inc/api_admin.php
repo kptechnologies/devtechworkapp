@@ -104,7 +104,7 @@ function act_dashboard(array $in, array $me): void
 function act_users_list(array $in, array $me): void
 {
     require_admin();
-    $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.active, u.last_login, u.created_at,
+    $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.schools, u.active, u.last_login, u.created_at,
                u.password_hash IS NOT NULL AS has_password,
                (SELECT MAX(report_date) FROM reports r WHERE r.user_id = u.id) AS last_report,
                (SELECT COUNT(*) FROM reports r WHERE r.user_id = u.id) AS reports,
@@ -114,6 +114,7 @@ function act_users_list(array $in, array $me): void
         $r['id'] = (int)$r['id'];
         $r['active'] = (int)$r['active'];
         $r['has_password'] = (bool)$r['has_password'];
+        $r['schools'] = user_schools($r);
         $r['balance'] = round((float)$r['balance'], 2);
     }
     json_out(['ok' => true, 'items' => $rows]);
@@ -149,14 +150,17 @@ function act_user_save(array $in, array $me): void
     if ($errors) {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
     }
-    $vals = [$name, $email, str_in($in['phone'] ?? '', 40), $role, str_in($in['location'] ?? '', 120), $active];
+    $vals = [$name, $email, str_in($in['phone'] ?? '', 40), $role, $active];
     if ($id) {
-        q('UPDATE users SET name = ?, email = ?, phone = ?, role = ?, location = ?, active = ? WHERE id = ?', array_merge($vals, [$id]));
+        q('UPDATE users SET name = ?, email = ?, phone = ?, role = ?, active = ? WHERE id = ?', array_merge($vals, [$id]));
         audit('user_update', 'user', $id, ['email' => $email, 'role' => $role, 'active' => $active]);
     } else {
-        q('INSERT INTO users (name, email, phone, role, location, active, created_at) VALUES (?,?,?,?,?,?,NOW())', $vals);
+        q('INSERT INTO users (name, email, phone, role, active, created_at) VALUES (?,?,?,?,?,NOW())', $vals);
         $id = (int)db()->lastInsertId();
         audit('user_create', 'user', $id, ['email' => $email, 'role' => $role]);
+    }
+    if (isset($in['schools']) || isset($in['location'])) {
+        save_user_schools($id, clean_schools($in['schools'] ?? [$in['location']]));
     }
     if ($pass !== '') {
         q('UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE id = ?', [password_hash($pass, PASSWORD_DEFAULT), $id]);
