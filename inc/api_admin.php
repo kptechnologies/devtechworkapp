@@ -197,7 +197,7 @@ function act_settings_get(array $in, array $me): void
         'work_days' => work_days(),
         'fault_types' => fault_types(),
         'require_signoff' => setting('require_signoff') !== false,
-        'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
+        'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'cron_path' => dirname(__DIR__) . '/cron.php', 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
         'smtp' => $smtp,
     ]]);
 }

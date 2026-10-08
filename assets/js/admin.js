@@ -358,7 +358,7 @@
           <div class="field"><label for="se-re">Also send to</label><textarea id="se-re" name="reminder_emails" rows="2" placeholder="operations@devtech.ng">${esc(rm.emails.join('\n'))}</textarea>
             <div class="help">One email per line. All admins get it automatically.</div></div>
           <div class="note-box small" style="margin-bottom:14px;white-space:normal"><b>Set up a cron job</b> (cPanel → Cron Jobs → Once per hour) so reminders go out on time:<br>
-            <code style="word-break:break-all">php /home/YOUR_CPANEL_USER/public_html${esc(location.pathname.replace(/[^/]*$/, ''))}cron.php</code> (adjust to your folder), or<br>
+            <code style="word-break:break-all">/usr/local/bin/php ${esc(rm.cron_path)} &gt;/dev/null 2&gt;&amp;1</code>, or<br>
             <code style="word-break:break-all">${esc(location.origin + location.pathname.replace(/[^/]*$/, ''))}cron.php?key=${esc(rm.cron_key)}</code><br>
             Without it, reminders are sent the first time someone opens the portal after the send time.${rm.last_run ? ` Last digest: ${esc(fmtDate(rm.last_run))}.` : ''}</div>
           <div class="actions"><button class="btn primary" type="submit">Save reminders</button><button class="btn" type="button" id="se-rtest"><i class="ti ti-mail-forward"></i>Send digest now</button></div></form>
