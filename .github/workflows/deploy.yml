@@ -29,11 +29,12 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           server-dir: ${{ vars.FTP_SERVER_DIR || './' }}
-          # Live settings, receipts/photos and the one-time installer stay untouched on the server.
+          # Live settings (incl. the root .htaccess with HTTPS forced), receipts/photos and the installer stay untouched.
           exclude: |
             **/.git*
             **/.git*/**
             .github/**
+            .htaccess
             config.php
             config.sample.php
             install.php
