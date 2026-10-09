@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -239,6 +239,36 @@ function table_sql(): array
             active TINYINT(1) NOT NULL DEFAULT 1,
             created_at DATETIME NOT NULL
         ) $t",
+        "CREATE TABLE IF NOT EXISTS pay_marks (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            work_date DATE NOT NULL,
+            kind VARCHAR(30) NOT NULL,
+            note VARCHAR(500) NOT NULL DEFAULT '',
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uq_mark (user_id, work_date, kind),
+            KEY idx_date (work_date)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS pay_adjustments (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            month CHAR(7) NOT NULL,
+            label VARCHAR(120) NOT NULL,
+            amount DECIMAL(12,2) NOT NULL,
+            note VARCHAR(500) NOT NULL DEFAULT '',
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_month_user (month, user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS pay_locks (
+            month CHAR(7) NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            data MEDIUMTEXT NOT NULL,
+            locked_by INT UNSIGNED NULL,
+            locked_at DATETIME NOT NULL,
+            PRIMARY KEY (month, user_id)
+        ) $t",
         "CREATE TABLE IF NOT EXISTS settings (
             k VARCHAR(60) PRIMARY KEY,
             v MEDIUMTEXT NOT NULL
@@ -276,6 +306,8 @@ function column_sql(): array
         ['attendance', 'out_missed', 'TINYINT(1) NOT NULL DEFAULT 0'],
         // v4: staff can be assigned to several schools
         ['users', 'schools', 'TEXT NULL'],
+        // v5: payroll
+        ['users', 'salary', 'DECIMAL(12,2) NOT NULL DEFAULT 0'],
     ];
 }
 

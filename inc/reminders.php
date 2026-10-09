@@ -193,6 +193,15 @@ function build_admin_digest(array $rs): array
         }
     }
 
+    // Overtime claims waiting for the admin's decision before they reach payroll.
+    if ($ot = payroll_overtime_pending()) {
+        $html .= digest_section('Overtime awaiting approval', '<p style="font-size:13px;margin:4px 0">'
+            . implode(', ', array_map(fn($x) => htmlspecialchars($x['name']) . ' (' . date('j M', strtotime($x['date'])) . ', out ' . date('g:ia', strtotime($x['out_at'])) . ')', $ot))
+            . '</p><p style="font-size:13px;margin:4px 0">Approve or reject them on the Payroll page.</p>', count($ot));
+        $count += count($ot);
+        $summary[] = count($ot) . ' overtime to approve';
+    }
+
     $subject = 'Daily follow-up: ' . ($summary ? implode(', ', $summary) : $count . ' item' . ($count === 1 ? '' : 's') . ' to follow up');
     $intro = '<p>Here\'s what needs following up today, so nothing is left for a client to complain about.</p>';
     return [$subject, email_layout($intro . $html), $count];

@@ -8,6 +8,7 @@ require __DIR__ . '/inc/api_admin.php';
 require __DIR__ . '/inc/api_jobs.php';
 require __DIR__ . '/inc/api_people.php';
 require __DIR__ . '/inc/api_clients.php';
+require __DIR__ . '/inc/api_payroll.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -40,7 +41,7 @@ $public = ['session', 'login'];
 $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
     'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
-    'attendance_report', 'attendance_report_export', 'clients_list', 'client_get'];
+    'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -180,6 +181,7 @@ function act_pulse(array $in, array $me): void
     if (is_admin($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
         $out['pending_requests'] = (int)q("SELECT COUNT(*) FROM fund_requests WHERE status='pending'")->fetchColumn();
+        $out['pending_overtime'] = count(payroll_overtime_pending());
     }
     maybe_run_reminders(); // fallback for hosts without a cron job
     json_out($out);

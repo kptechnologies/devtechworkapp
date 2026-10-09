@@ -312,6 +312,8 @@
     const list = (k, label, help) => `<div class="field"><label for="se-${k}">${label}</label><textarea id="se-${k}" name="${k}" rows="6">${esc((s[k] || []).join('\n'))}</textarea><div class="help">${help}</div></div>`;
     const sm = s.smtp || {};
     const rm = s.reminders;
+    const pr = s.pay_rules;
+    const payField = (k, label, unit = 'money') => `<div class="field"><label for="se-pay-${k}">${label}${unit === 'money' ? ` (${esc(App.cfg.currency)})` : ''}</label><input type="number" id="se-pay-${k}" name="${k}" min="0" step="${unit === 'money' ? '0.01' : '1'}" value="${esc(pr[k])}"></div>`;
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Settings</h1></div></div>
       <form class="card card-pad" id="se-co" style="margin-bottom:14px"><div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
@@ -349,6 +351,16 @@
             <div class="help">A working day with no clock-in counts as absent in the attendance report.</div></div>
           <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="require_signoff" ${s.require_signoff ? 'checked' : ''}><span>Jobs need the client's signature when completed (staff must give a reason if the client can't sign)</span></label>
           <button class="btn primary" type="submit">Save attendance settings</button></form>
+        <form class="card card-pad" id="se-pay"><h3 style="margin-bottom:4px">Pay rules</h3>
+          <p class="muted small" style="margin-bottom:14px">How <a href="#/payroll">Payroll</a> adjusts each month's salary from attendance. Lateness uses the work start and grace above.</p>
+          <div class="form-row">${payField('late', 'Late, per day')}${payField('very_late', 'Very late, instead')}</div>
+          <div class="form-row">${payField('very_late_min', 'Very late after (minutes)', 'min')}${payField('absent', 'Absent without approval')}</div>
+          <div class="form-row">${payField('absent_notified', 'Failed to clock in, notified')}${payField('report_missing', 'No daily report')}</div>
+          <div class="form-row"><div class="field"><label for="se-pay-rd">Report deadline</label><input type="time" id="se-pay-rd" name="report_deadline" value="${esc(pr.report_deadline)}"></div>${payField('job_failure', 'Job order failure (preset)')}</div>
+          <div class="form-row">${payField('overtime', 'Overtime, per approved day')}${payField('overtime_min', 'Overtime after closing (minutes)', 'min')}</div>
+          <div class="field"><label for="se-pay-ef">Rules apply from</label><input type="date" id="se-pay-ef" name="effective_from" value="${esc(pr.effective_from)}" style="max-width:220px">
+            <div class="help">Days before this date are never charged.</div></div>
+          <button class="btn primary" type="submit">Save pay rules</button></form>
         <form class="card card-pad" id="se-rem"><h3 style="margin-bottom:4px">Follow-up reminders</h3>
           <p class="muted small" style="margin-bottom:14px">A daily email listing overdue, stalled, high-priority and unchecked jobs plus yesterday's lateness, so you can follow up before clients complain. Each staff member also gets their own list.</p>
           ${rm.mail_enabled ? '' : '<div class="note-box warn" style="margin-bottom:12px">Email is turned off. Turn on email notifications above, or reminders only show inside the portal.</div>'}
@@ -377,6 +389,10 @@
         Object.assign(App.cfg, { work_start: d.work_start, work_end: d.work_end, late_grace: +d.late_grace || 0 });
         toast('Attendance settings saved');
       } catch (err) { App.fail(err); }
+    });
+    $('#se-pay', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await App.busy(e.submitter, () => api('settings_save', { data: { pay_rules: App.formData(e.target) } })); toast('Pay rules saved'); } catch (err) { App.fail(err); }
     });
     $('#se-rem', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();

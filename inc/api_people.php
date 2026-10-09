@@ -3,7 +3,7 @@
 
 const TOOL_CONDITIONS = ['good', 'fair', 'faulty', 'lost', 'retired'];
 const PROFILE_COLS = 'id, name, email, phone, role, location, schools, job_title, duties, address, next_of_kin, next_of_kin_phone,
-    bank_name, bank_account, start_date, photo_id, active, last_login, created_at';
+    bank_name, bank_account, start_date, salary, photo_id, active, last_login, created_at';
 
 /* ---------------------------------------------------------------- profile */
 
@@ -59,6 +59,9 @@ function act_staff_profile_save(array $in, array $me): void
         $v['job_title'] = str_in($in['job_title'] ?? '', 120);
         $v['start_date'] = valid_date($in['start_date'] ?? null) ? $in['start_date'] : null;
         $v['duties'] = json_encode(array_values(array_intersect(DUTIES, (array)($in['duties'] ?? []))), JSON_UNESCAPED_UNICODE);
+        if (isset($in['salary']) && $in['salary'] !== '') {
+            $v['salary'] = max(0, money_in($in['salary']));
+        }
     }
     $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($v)));
     q("UPDATE users SET $set WHERE id = ?", array_merge(array_values($v), [$uid]));

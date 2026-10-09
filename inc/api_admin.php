@@ -197,6 +197,7 @@ function act_settings_get(array $in, array $me): void
         'work_days' => work_days(),
         'fault_types' => fault_types(),
         'require_signoff' => setting('require_signoff') !== false,
+        'pay_rules' => pay_rules(),
         'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'cron_path' => dirname(__DIR__) . '/cron.php', 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
         'smtp' => $smtp,
     ]]);
@@ -284,6 +285,28 @@ function act_settings_save(array $in, array $me): void
             fail('Add at least one device with its faults.');
         }
         save_setting('fault_types', $types);
+    }
+    if (isset($in['pay_rules']) && is_array($in['pay_rules'])) {
+        $r = $in['pay_rules'];
+        $rules = [];
+        foreach (pay_rule_defaults() as $k => $def) {
+            $v = $r[$k] ?? $def;
+            if ($k === 'report_deadline') {
+                if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string)$v)) {
+                    fail('Enter the report deadline as HH:MM.');
+                }
+            } elseif ($k === 'effective_from') {
+                if (!valid_date((string)$v)) {
+                    fail('Enter the date the pay rules start from.');
+                }
+            } elseif (!is_numeric($v) || $v < 0) {
+                fail('Pay rule amounts and minutes must be 0 or more.');
+            } else {
+                $v = in_array($k, ['very_late_min', 'overtime_min'], true) ? min(600, (int)$v) : money_in($v);
+            }
+            $rules[$k] = $v;
+        }
+        save_setting('pay_rules', $rules);
     }
     if (isset($in['daily_allowance_default'])) {
         save_setting('daily_allowance_default', money_in($in['daily_allowance_default']));

@@ -508,7 +508,9 @@
       return `<div class="grid g2">
         <form class="card card-pad" id="pd-form"><h3 style="margin-bottom:14px">Personal details</h3>
           ${admin ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
-            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>` : ''}
+            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>
+            <div class="field"><label for="pd-salary">Monthly salary (${esc(App.cfg.currency)})</label><input type="number" id="pd-salary" name="salary" min="0" step="0.01" value="${esc(+u.salary ? u.salary : '')}" style="max-width:220px">
+              <div class="help">Payroll deducts attendance charges from this. See <a href="#/payroll">Payroll</a>.</div></div>` : ''}
           ${f('phone', 'Phone', u.phone, 'type="tel"')}
           ${App.schoolsField(u.schools)}
           ${f('address', 'Home address', u.address)}

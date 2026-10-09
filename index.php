@@ -33,6 +33,7 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <script src="<?= $v('assets/js/jobs.js') ?>"></script>
 <script src="<?= $v('assets/js/people.js') ?>"></script>
 <script src="<?= $v('assets/js/clients.js') ?>"></script>
+<script src="<?= $v('assets/js/payroll.js') ?>"></script>
 <script src="<?= $v('assets/js/admin.js') ?>"></script>
 </body>
 </html>
