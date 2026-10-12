@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -268,6 +268,83 @@ function table_sql(): array
             locked_by INT UNSIGNED NULL,
             locked_at DATETIME NOT NULL,
             PRIMARY KEY (month, user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS projects (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(190) NOT NULL,
+            category VARCHAR(80) NOT NULL DEFAULT '',
+            client_id INT UNSIGNED NULL,
+            job_id INT UNSIGNED NULL,
+            contract_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+            budget DECIMAL(12,2) NOT NULL DEFAULT 0,
+            status VARCHAR(10) NOT NULL DEFAULT 'active',
+            start_date DATE NULL,
+            end_date DATE NULL,
+            notes TEXT NULL,
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_status (status),
+            KEY idx_client (client_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS company_txns (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            kind VARCHAR(10) NOT NULL,
+            amount DECIMAL(12,2) NOT NULL,
+            effect DECIMAL(12,2) NOT NULL,
+            category VARCHAR(80) NOT NULL DEFAULT '',
+            project_id INT UNSIGNED NULL,
+            job_id INT UNSIGNED NULL,
+            contractor_id INT UNSIGNED NULL,
+            payee VARCHAR(190) NOT NULL DEFAULT '',
+            method VARCHAR(20) NOT NULL DEFAULT '',
+            description TEXT NULL,
+            txn_date DATE NOT NULL,
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NULL,
+            voided_at DATETIME NULL,
+            voided_by INT UNSIGNED NULL,
+            void_reason VARCHAR(500) NOT NULL DEFAULT '',
+            KEY idx_date (txn_date),
+            KEY idx_project (project_id),
+            KEY idx_contractor (contractor_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS contractors (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(120) NOT NULL,
+            phone VARCHAR(40) NOT NULL DEFAULT '',
+            trade VARCHAR(120) NOT NULL DEFAULT '',
+            bank_name VARCHAR(80) NOT NULL DEFAULT '',
+            bank_account VARCHAR(40) NOT NULL DEFAULT '',
+            rate_note VARCHAR(190) NOT NULL DEFAULT '',
+            notes TEXT NULL,
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS staff_queries (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NULL,
+            contractor_id INT UNSIGNED NULL,
+            subject VARCHAR(190) NOT NULL,
+            details TEXT NULL,
+            category VARCHAR(30) NOT NULL DEFAULT 'other',
+            job_id INT UNSIGNED NULL,
+            query_date DATE NOT NULL,
+            reply_by DATE NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            reply TEXT NULL,
+            replied_at DATETIME NULL,
+            replied_by INT UNSIGNED NULL,
+            outcome_note TEXT NULL,
+            fine DECIMAL(12,2) NOT NULL DEFAULT 0,
+            pay_adjustment_id INT UNSIGNED NULL,
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            closed_at DATETIME NULL,
+            closed_by INT UNSIGNED NULL,
+            KEY idx_user (user_id, status),
+            KEY idx_contractor (contractor_id),
+            KEY idx_status (status)
         ) $t",
         "CREATE TABLE IF NOT EXISTS settings (
             k VARCHAR(60) PRIMARY KEY,

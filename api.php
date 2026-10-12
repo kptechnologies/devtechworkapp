@@ -9,6 +9,8 @@ require __DIR__ . '/inc/api_jobs.php';
 require __DIR__ . '/inc/api_people.php';
 require __DIR__ . '/inc/api_clients.php';
 require __DIR__ . '/inc/api_payroll.php';
+require __DIR__ . '/inc/company.php';
+require __DIR__ . '/inc/api_queries.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -41,7 +43,8 @@ $public = ['session', 'login'];
 $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
     'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
-    'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export'];
+    'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
+    'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -90,7 +93,12 @@ function public_config(array $me): array
         'work_end'      => work_end(),
         'late_grace'    => late_grace(),
         'clients'       => client_names(),
-    ];
+        'query_categories' => QUERY_CATEGORIES,
+    ] + (is_admin($me) ? [
+        'company_categories' => company_categories(),
+        'project_categories' => project_categories(),
+        'payment_methods'    => CTXN_METHODS,
+    ] : []);
 }
 
 function act_session(array $in, ?array $me): void
@@ -177,6 +185,7 @@ function act_pulse(array $in, array $me): void
         'change'  => (float)(json_decode((string)(q("SELECT v FROM settings WHERE k = '_last_change'")->fetchColumn() ?: '0'), true) ?: 0),
         'unread'  => (int)q('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL', [$me['id']])->fetchColumn(),
         'wallet'  => wallet_stats($me['id']),
+        'queries' => query_badge($me),
     ] + job_badges($me);
     if (is_admin($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
@@ -215,6 +224,12 @@ function act_attachment_delete(array $in, array $me): void
             $st = q('SELECT status FROM wallet_txns WHERE id = ?', [$a['owner_id']])->fetchColumn();
             if (!in_array($st, ['posted', 'queried'], true)) {
                 fail('This expense has been reviewed, so its receipts are locked.', 403);
+            }
+        }
+        if ($a['owner_type'] === 'query') {
+            $st = q('SELECT status FROM staff_queries WHERE id = ?', [$a['owner_id']])->fetchColumn();
+            if (!in_array($st, ['open', 'replied'], true)) {
+                fail('This query is closed, so its files are locked.', 403);
             }
         }
         if (in_array($a['owner_type'], ['attend', 'attendout'], true)) {

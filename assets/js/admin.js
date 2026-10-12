@@ -60,6 +60,12 @@
           ${kpi('Jobs to check', jb.to_check + jb.requested, `${jb.to_check} completed · ${jb.requested} logged by staff`, 'clipboard-check', (jb.to_check + jb.requested) ? 'tone-out' : 'tone-in')}
           ${kpi('Active jobs', jb.active, `${jb.overdue} overdue · ${jb.done} closed in period`, 'clipboard-list', jb.overdue ? 'tone-bad' : 'tone-info')}
         </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          <a href="#/company" style="color:inherit;text-decoration:none">${kpi('Company wallet', money(d.company.balance), `${money(d.company.spent_today)} spent today`, 'building-bank', d.company.balance < 0 ? 'tone-bad' : 'tone-brand')}</a>
+          <a href="#/company" style="color:inherit;text-decoration:none">${kpi('Company spend', money(d.company.spent_month), `This month · ${money(d.company.spent_week)} this week`, 'receipt', 'tone-out')}</a>
+          <a href="#/projects" style="color:inherit;text-decoration:none">${kpi('Active projects', d.company.active_projects, `${money(d.company.income_month)} client payments this month`, 'briefcase', 'tone-info')}</a>
+          <a href="#/queries" style="color:inherit;text-decoration:none">${kpi('Open queries', d.company.open_queries, 'Staff and contract staff', 'alert-triangle', d.company.open_queries ? 'tone-bad' : 'tone-in')}</a>
+        </div>
         ${d.missing_today.length || at.missing.length ? `<div class="card card-pad" style="margin-bottom:14px;display:grid;gap:8px">
           ${at.missing.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a class="muted small" href="#/attendance"><i class="ti ti-user-off"></i> Not clocked in:</a>
             ${at.missing.map((s) => `<a class="pill out" href="#/staff/${s.id}">${esc(s.name)}</a>`).join('')}</div>` : ''}
@@ -326,6 +332,8 @@
           ${list('locations', 'Schools / locations', 'One per line. Used in reports and staff profiles.')}
           ${list('expense_categories', 'Expense categories', 'One per line. Staff pick from these when logging expenses.')}
           ${list('credit_types', 'Payment types', 'One per line, e.g. Daily allowance, Work budget, Top-up.')}
+          ${list('company_expense_categories', 'Company expense categories', 'One per line. Used for company wallet expenses, e.g. Inverter installation, CCTV installation, Procurement.')}
+          ${list('project_categories', 'Project types', 'One per line. The kinds of contract work you take on.')}
           <div class="field"><label for="se-al">Default daily allowance (${esc(App.cfg.currency)})</label><input type="number" id="se-al" name="daily_allowance_default" value="${esc(s.daily_allowance_default || '')}" min="0" step="0.01"><div class="help">Pre-fills the amount on Send payment.</div></div>
           <button class="btn primary" type="submit">Save lists</button></form>
         <form class="card card-pad" id="se-smtp"><h3 style="margin-bottom:4px">Email notifications</h3>
@@ -436,7 +444,8 @@
       const d = App.formData(e.target);
       const split = (v) => v.split('\n').map((x) => x.trim()).filter(Boolean);
       try {
-        await App.busy(e.submitter, () => api('settings_save', { data: { locations: split(d.locations), expense_categories: split(d.expense_categories), credit_types: split(d.credit_types), daily_allowance_default: d.daily_allowance_default } }));
+        await App.busy(e.submitter, () => api('settings_save', { data: { locations: split(d.locations), expense_categories: split(d.expense_categories), credit_types: split(d.credit_types),
+          company_expense_categories: split(d.company_expense_categories), project_categories: split(d.project_categories), daily_allowance_default: d.daily_allowance_default } }));
         Object.assign(App.cfg, { locations: split(d.locations), categories: split(d.expense_categories), credit_types: split(d.credit_types), allowance: +d.daily_allowance_default || 0 });
         const sess = await api('session');
         App.cfg = sess.config;

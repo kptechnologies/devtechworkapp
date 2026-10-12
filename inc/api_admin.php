@@ -96,6 +96,10 @@ function act_dashboard(array $in, array $me): void
         ],
         'review' => $review,
         'requests' => $requests,
+        'company' => company_stats() + [
+            'open_queries' => (int)q("SELECT COUNT(*) FROM staff_queries WHERE status IN ('open','replied')")->fetchColumn(),
+            'active_projects' => (int)q("SELECT COUNT(*) FROM projects WHERE status = 'active'")->fetchColumn(),
+        ],
     ]);
 }
 
@@ -190,6 +194,8 @@ function act_settings_get(array $in, array $me): void
         'locations' => setting('locations'),
         'expense_categories' => setting('expense_categories'),
         'credit_types' => setting('credit_types'),
+        'company_expense_categories' => company_categories(),
+        'project_categories' => project_categories(),
         'daily_allowance_default' => (float)setting('daily_allowance_default'),
         'work_start' => work_start(),
         'work_end' => work_end(),
@@ -206,7 +212,7 @@ function act_settings_get(array $in, array $me): void
 function act_settings_save(array $in, array $me): void
 {
     require_admin();
-    $lists = ['locations', 'expense_categories', 'credit_types'];
+    $lists = ['locations', 'expense_categories', 'credit_types', 'company_expense_categories', 'project_categories'];
     foreach ($lists as $k) {
         if (isset($in[$k])) {
             $vals = array_values(array_unique(array_filter(array_map(fn($x) => str_in($x, 120), (array)$in[$k]), 'strlen')));

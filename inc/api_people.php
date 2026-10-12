@@ -38,6 +38,7 @@ function act_staff_profile(array $in, array $me): void
         'attendance' => array_map('attendance_row', $att),
         'month' => attendance_month($uid, date('Y-m-01'), today()),
         'wallet' => wallet_stats($uid),
+        'queries' => person_queries($uid, null),
     ]);
 }
 

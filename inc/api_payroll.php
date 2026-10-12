@@ -299,20 +299,27 @@ function act_payroll_adjust(array $in, array $me): void
     if ($errors) {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
     }
+    $id = payroll_add_adjustment($uid, $month, $label, $amount, str_in($in['note'] ?? '', 500), $me);
+    touch_change();
+    json_out(['ok' => true, 'id' => $id]);
+}
+
+/** Add a salary charge (negative) or bonus (positive) to a month; also used for query fines. */
+function payroll_add_adjustment(int $uid, string $month, string $label, float $amount, string $note, array $me): int
+{
     if (!q('SELECT 1 FROM users WHERE id = ?', [$uid])->fetchColumn()) {
         fail('Staff member not found.', 404);
     }
     if (month_locked($month, $uid)) {
-        fail('This month is locked. Unlock it first.');
+        fail('Payroll for ' . date('F Y', strtotime($month . '-01')) . ' is locked. Unlock it first.');
     }
     q('INSERT INTO pay_adjustments (user_id, month, label, amount, note, created_by, created_at) VALUES (?,?,?,?,?,?,NOW())',
-        [$uid, $month, $label, $amount, str_in($in['note'] ?? '', 500), $me['id']]);
+        [$uid, $month, $label, $amount, $note, $me['id']]);
     $id = (int)db()->lastInsertId();
     audit('pay_adjust', 'user', $uid, ['month' => $month, 'label' => $label, 'amount' => $amount]);
     notify([$uid], 'payroll', ($amount < 0 ? 'Salary deduction: ' : 'Salary addition: ') . $label,
         ($amount < 0 ? '-' : '+') . money_fmt(abs($amount)) . ' for ' . date('F Y', strtotime($month . '-01')), 'my-pay');
-    touch_change();
-    json_out(['ok' => true, 'id' => $id]);
+    return $id;
 }
 
 function act_payroll_adjust_delete(array $in, array $me): void

@@ -443,7 +443,7 @@
   App.route('staff/:id', (ctx) => profileView(ctx, +ctx.params.id), { title: 'Staff profile', nav: 'staff', admin: true, live: true });
   App.route('profile', (ctx) => profileView(ctx, null), { title: 'Profile' });
 
-  const PTABS = [['details', 'Details', 'id'], ['tools', 'Tools', 'tools'], ['attendance', 'Attendance', 'clock'], ['jobs', 'Jobs', 'clipboard-list'], ['reports', 'Reports', 'clipboard-text'], ['wallet', 'Wallet', 'wallet']];
+  const PTABS = [['details', 'Details', 'id'], ['tools', 'Tools', 'tools'], ['attendance', 'Attendance', 'clock'], ['jobs', 'Jobs', 'clipboard-list'], ['reports', 'Reports', 'clipboard-text'], ['wallet', 'Wallet', 'wallet'], ['queries', 'Queries', 'alert-triangle']];
 
   async function profileView(ctx, id) {
     const admin = isAdmin();
@@ -469,7 +469,7 @@
           <div class="card kpi"><div class="kpi-icon tone-info"><i class="ti ti-hourglass"></i></div><div class="label">Avg hours / day</div><div class="value">${m.avg_hours}</div><div class="sub">${m.hours}h this month</div></div>
           <div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-wallet"></i></div><div class="label">Wallet balance</div><div class="value">${money(p.wallet.balance)}</div><div class="sub">${p.tools.length} tool${p.tools.length === 1 ? '' : 's'} held</div></div>
         </div>
-        <div class="seg scroll" id="pf-tabs" style="margin-bottom:12px">${PTABS.map(([k, l, i]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}</button>`).join('')}</div>
+        <div class="seg scroll" id="pf-tabs" style="margin-bottom:12px">${PTABS.map(([k, l, i]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}${k === 'queries' && p.queries.length ? ` <span class="pill ${p.queries.some((x) => ['open', 'replied'].includes(x.status)) ? 'bad' : ''}" style="padding:0 6px">${p.queries.length}</span>` : ''}</button>`).join('')}</div>
         <div id="pf-body"></div>`;
       const body = $('#pf-body', ctx.el);
       const draw = () => {
@@ -554,6 +554,11 @@
           <div class="main-col"><div class="t">${esc(fmtDate(x.report_date))}</div><div class="s">${esc(x.location)} · ${esc(x.work_type)}</div></div>${App.finishedPill(x.finished)}</li>`).join('')}</ul>`
           : App.empty('clipboard', 'No reports yet')}</div>`;
     }
+    if (tab === 'queries') {
+      const warnings = p.queries.filter((x) => x.status === 'warning').length;
+      return `<div class="card"><div class="card-head"><h3>Queries${warnings ? ` <span class="pill bad">${warnings} warning${warnings === 1 ? '' : 's'}</span>` : ''}</h3>
+        ${admin && !self ? '<button class="btn sm primary" id="pq-new"><i class="ti ti-alert-triangle"></i>Raise a query</button>' : ''}</div>${App.queryList(p.queries)}</div>`;
+    }
     const w = p.wallet;
     return `<div class="card card-pad"><div class="grid g3">
       <div><div class="muted small">Balance</div><div style="font-size:22px;font-weight:600" class="${w.balance < 0 ? 'bad' : ''}">${money(w.balance)}</div></div>
@@ -613,5 +618,9 @@
         .catch(() => { const box = $('#pt-cal', body); if (box) box.innerHTML = ''; });
     }
     if (tab === 'jobs') $$('[data-job]', body).forEach((li) => li.addEventListener('click', () => App.openJob(+li.dataset.job)));
+    if (tab === 'queries') {
+      App.bindQueryList(body);
+      $('#pq-new', body)?.addEventListener('click', () => App.queryForm({ user_id: p.user.id, name: p.user.name }));
+    }
   }
 })();

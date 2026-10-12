@@ -23,6 +23,7 @@ if (!is_admin($me)) {
         'attend', 'attendout' => q('SELECT user_id FROM attendance WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'tool'    => q('SELECT holder_id FROM tools WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'avatar'  => $a['owner_id'],
+        'query'   => q('SELECT user_id FROM staff_queries WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         // Job photos: whoever logged the job and the staff currently on it.
         'jobnote' => q('SELECT ? FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ? AND (j.created_by = ?
                         OR EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL))',

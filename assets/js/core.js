@@ -418,6 +418,11 @@
         { href: 'balances', icon: 'wallet', text: 'Balances' },
         { href: 'ledger', icon: 'list-details', text: 'Ledger' },
         { href: 'payroll', icon: 'report-money', text: 'Payroll', badge: 'payroll' },
+        { label: 'Company' },
+        { href: 'company', icon: 'building-bank', text: 'Company wallet' },
+        { href: 'projects', icon: 'briefcase', text: 'Projects' },
+        { href: 'contractors', icon: 'user-cog', text: 'Contract staff' },
+        { href: 'queries', icon: 'alert-triangle', text: 'Queries', badge: 'queries' },
         { label: 'Work' },
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports', mobile: true },
@@ -441,6 +446,7 @@
       { href: 'reports', icon: 'clipboard-text', text: 'My reports' },
       { href: 'attendance', icon: 'clock-check', text: 'My attendance' },
       { href: 'my-pay', icon: 'report-money', text: 'My pay' },
+      { href: 'queries', icon: 'alert-triangle', text: 'My queries', badge: 'queries' },
       { href: 'requests', icon: 'cash', text: 'Funding requests' },
       { href: 'profile', icon: 'user', text: 'Profile', mobile: true },
     ];
@@ -532,6 +538,7 @@
     if ('pending_requests' in p) App.badges.requests = p.pending_requests;
     if ('pending_overtime' in p) App.badges.payroll = p.pending_overtime;
     if ('jobs' in p) App.badges.jobs = p.jobs;
+    if ('queries' in p) App.badges.queries = p.queries;
     $$('[data-badge]').forEach((b) => {
       const n = App.badges[b.dataset.badge] || 0;
       b.textContent = n;
