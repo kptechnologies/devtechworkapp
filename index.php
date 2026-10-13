@@ -36,6 +36,7 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <script src="<?= $v('assets/js/payroll.js') ?>"></script>
 <script src="<?= $v('assets/js/company.js') ?>"></script>
 <script src="<?= $v('assets/js/queries.js') ?>"></script>
+<script src="<?= $v('assets/js/lessons.js') ?>"></script>
 <script src="<?= $v('assets/js/admin.js') ?>"></script>
 </body>
 </html>

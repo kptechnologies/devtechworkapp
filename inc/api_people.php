@@ -27,15 +27,15 @@ function act_staff_profile(array $in, array $me): void
     $jobs = q(JOB_LIST_SQL . " WHERE EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL)
         ORDER BY j.status IN ('done','cancelled'), j.id DESC LIMIT 30", [$uid])->fetchAll();
     $reports = q('SELECT id, report_date, location, work_type, finished FROM reports WHERE user_id = ? ORDER BY report_date DESC, id DESC LIMIT 8', [$uid])->fetchAll();
-    $att = q('SELECT id, work_date, in_at, out_at, in_site, in_dist, out_site, note, source, in_reason, out_reason, flags, out_missed FROM attendance
-        WHERE user_id = ? ORDER BY in_at DESC LIMIT 31', [$uid])->fetchAll();
+    $att = q('SELECT id, user_id, work_date, in_at, out_at, in_site, in_dist, out_site, note, source, in_reason, out_reason, flags, out_missed,
+        location, work_type, work_note FROM attendance WHERE user_id = ? ORDER BY in_at DESC LIMIT 31', [$uid])->fetchAll();
     json_out([
         'ok' => true,
         'user' => $u,
         'tools' => $tools,
         'jobs' => array_map('job_row', $jobs),
         'reports' => $reports,
-        'attendance' => array_map('attendance_row', $att),
+        'attendance' => attendance_visits(array_map('attendance_row', $att)),
         'month' => attendance_month($uid, date('Y-m-01'), today()),
         'wallet' => wallet_stats($uid),
         'queries' => person_queries($uid, null),
@@ -259,6 +259,8 @@ const GPS_MAX_AGE = 60;       // seconds between the GPS fix and pressing the bu
 const CLOCK_MAX_SKEW = 300;   // seconds the phone's clock may differ from the server
 const GPS_MAX_ACCURACY = 200; // metres
 const SELFIE_MAX_AGE = 600;   // seconds since the selfie was taken
+const SITE_RADIUS = 300;      // metres from a school's GPS point before a clock-in there is flagged "far"
+const WORK_NOTE_MIN = 10;     // characters in the "what did you do here?" note at clock-out
 
 function hhmm_setting(string $key, string $default): string
 {
@@ -307,15 +309,76 @@ function nearest_site(?float $lat, ?float $lng): array
     }
     $best = ['', null];
     foreach (site_coords() as $name => [$slat, $slng]) {
-        $dLat = deg2rad($slat - $lat);
-        $dLng = deg2rad($slng - $lng);
-        $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat)) * cos(deg2rad($slat)) * sin($dLng / 2) ** 2;
-        $m = (int)round(6371000 * 2 * atan2(sqrt($a), sqrt(1 - $a)));
+        $m = metres_between($lat, $lng, $slat, $slng);
         if ($best[1] === null || $m < $best[1]) {
             $best = [$name, $m];
         }
     }
     return $best;
+}
+
+/** Great-circle distance in metres. */
+function metres_between(float $lat, float $lng, float $lat2, float $lng2): int
+{
+    $dLat = deg2rad($lat2 - $lat);
+    $dLng = deg2rad($lng2 - $lng);
+    $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+    return (int)round(6371000 * 2 * atan2(sqrt($a), sqrt(1 - $a)));
+}
+
+/** Work types a staff member can tag at clock-out. */
+function work_types(): array
+{
+    return array_merge(DUTIES, ['Other']);
+}
+
+/** "Office"/"Other" are never anyone's assigned school, so visits there aren't flagged. */
+function is_office_location(string $name): bool
+{
+    return (bool)preg_match('/^(office|other)\b/i', $name);
+}
+
+/** Job orders tagged at each clock-out: {attendance id: [{id, ref, title}]}. */
+function attendance_jobs_for(array $ids): array
+{
+    $ids = array_filter(array_map('intval', $ids));
+    if (!$ids) {
+        return [];
+    }
+    $out = [];
+    foreach (q('SELECT aj.attendance_id, j.id, j.title FROM attendance_jobs aj JOIN jobs j ON j.id = aj.job_id
+        WHERE aj.attendance_id IN (' . implode(',', $ids) . ') ORDER BY j.id')->fetchAll() as $r) {
+        $out[(int)$r['attendance_id']][] = ['id' => (int)$r['id'], 'ref' => job_ref((int)$r['id']), 'title' => $r['title']];
+    }
+    return $out;
+}
+
+/**
+ * A day can have several visits (one clock-in/out per location). Only the day's first clock-in can be late and only
+ * its last clock-out can be early, so clear those flags on the visits in between, and add the tagged jobs.
+ */
+function attendance_visits(array $rows): array
+{
+    $first = $last = [];
+    foreach ($rows as $r) {
+        $k = $r['user_id'] . '|' . $r['work_date'];
+        $first[$k] = isset($first[$k]) && $first[$k] <= $r['in_at'] ? $first[$k] : $r['in_at'];
+        $last[$k] = isset($last[$k]) && $last[$k] >= $r['in_at'] ? $last[$k] : $r['in_at'];
+    }
+    $jobs = attendance_jobs_for(array_column($rows, 'id'));
+    foreach ($rows as &$r) {
+        $k = $r['user_id'] . '|' . $r['work_date'];
+        $r['first_visit'] = $r['in_at'] === $first[$k];
+        if (!$r['first_visit']) {
+            $r['late'] = false;
+            $r['late_min'] = 0;
+        }
+        if ($r['in_at'] !== $last[$k]) {
+            $r['early'] = false;
+        }
+        $r['jobs'] = $jobs[$r['id']] ?? [];
+    }
+    return $rows;
 }
 
 /** Adds late (and minutes late), early leave, hours worked and a missed clock-out flag to an attendance row. */
@@ -329,6 +392,7 @@ function attendance_row(array $r): array
     $r['early'] = $r['out_at'] && substr($r['out_at'], 0, 10) === $r['work_date'] && strtotime($r['out_at']) < strtotime($r['work_date'] . ' ' . work_end());
     $r['minutes'] = $r['out_at'] ? max(0, (int)round((strtotime($r['out_at']) - $in) / 60)) : null;
     $r['missed_out'] = !$r['out_at'] && ((int)($r['out_missed'] ?? 0) || $r['work_date'] < today());
+    $r['location_label'] = ($r['location'] ?? '') !== '' ? $r['location'] : ($r['in_site'] ?? '');
     return $r;
 }
 
@@ -357,9 +421,16 @@ function open_attendance(int $uid): ?array
 
 function act_attendance_today(array $in, array $me): void
 {
-    $r = q('SELECT * FROM attendance WHERE user_id = ? AND work_date = ? ORDER BY in_at DESC LIMIT 1', [$me['id'], today()])->fetch();
+    $visits = attendance_visits(array_map('attendance_row',
+        q('SELECT * FROM attendance WHERE user_id = ? AND work_date = ? ORDER BY in_at', [$me['id'], today()])->fetchAll()));
     $open = open_attendance($me['id']);
-    json_out(['ok' => true, 'record' => $r ? attendance_row($r) : null, 'open' => $open ? attendance_row($open) : null,
+    $sites = [];
+    foreach (site_coords() as $name => [$lat, $lng]) {
+        $sites[] = ['name' => $name, 'lat' => $lat, 'lng' => $lng];
+    }
+    json_out(['ok' => true, 'record' => $visits ? $visits[count($visits) - 1] : null, 'open' => $open ? attendance_row($open) : null,
+        'visits' => $visits, 'my_schools' => $me['schools'], 'sites' => $sites, 'site_radius' => SITE_RADIUS,
+        'work_types' => work_types(), 'work_note_min' => WORK_NOTE_MIN, 'lessons' => lessons_today($me['id']),
         'work_start' => work_start(), 'work_end' => work_end(), 'late_grace' => late_grace(), 'server_time' => time()]);
 }
 
@@ -427,19 +498,58 @@ function act_clock(array $in, array $me): void
     }
 
     $open = open_attendance($me['id']);
+    $location = '';
+    $clientId = null;
+    $jobs = [];
+    $workType = $workNote = '';
+    $lastStop = 0;
     if ($action === 'in') {
         if ($open) {
-            fail('You\'re already clocked in since ' . date('g:ia', strtotime($open['in_at'])) . '. Clock out first.');
+            fail('You\'re already clocked in at ' . (attendance_row($open)['location_label'] ?: 'a location') . ' since '
+                . date('g:ia', strtotime($open['in_at'])) . '. Clock out there first.');
         }
-        $late = $now >= strtotime(today() . ' ' . work_start()) + late_grace() * 60 + 60;
+        $want = mb_strtolower(trim((string)($in['location'] ?? '')));
+        foreach (location_options() as $name) {
+            if (mb_strtolower($name) === $want) {
+                $location = $name;
+            }
+        }
+        if ($location === '') {
+            clock_fail('location', 'Choose the school or location you\'re at.');
+        }
+        $clientId = q('SELECT id FROM clients WHERE name = ?', [$location])->fetchColumn() ?: null;
+        // Lateness is judged on the day's first clock-in only; later visits to other schools are never "late".
+        $firstToday = !q('SELECT 1 FROM attendance WHERE user_id = ? AND work_date = ?', [$me['id'], today()])->fetchColumn();
+        $late = $firstToday && $now >= strtotime(today() . ' ' . work_start()) + late_grace() * 60 + 60;
         if ($late && $reason === '' && !in_array('no_gps', $flags, true)) {
             clock_fail('late_reason', 'You\'re late (work starts at ' . work_start() . '). Say why.');
+        }
+        $coords = site_coords()[$location] ?? null;
+        if ($coords && $lat !== null && metres_between($lat, $lng, $coords[0], $coords[1]) > SITE_RADIUS) {
+            $flags[] = 'far';
+        }
+        if (!is_office_location($location) && !in_array(mb_strtolower($location), array_map('mb_strtolower', $me['schools']), true)) {
+            $flags[] = 'unassigned';
         }
     } else {
         if (!$open) {
             fail('You haven\'t clocked in yet.');
         }
-        $early = $open['work_date'] === today() && $now < strtotime(today() . ' ' . work_end());
+        $workType = in_array($in['work_type'] ?? '', work_types(), true) ? $in['work_type'] : '';
+        $workNote = str_in($in['work_note'] ?? '', 2000);
+        if ($workType === '' || mb_strlen($workNote) < WORK_NOTE_MIN) {
+            clock_fail('work_tag', 'Say what work you did here: choose the type of work and write a short note.');
+        }
+        foreach (array_unique(array_map('intval', (array)($in['jobs'] ?? []))) as $jobId) {
+            $status = $jobId > 0 ? q('SELECT status FROM jobs WHERE id = ?', [$jobId])->fetchColumn() : false;
+            if (!$status || !in_array($me['id'], job_assignee_ids($jobId), true)) {
+                fail(job_ref($jobId) . ' isn\'t one of your job orders.');
+            }
+            $jobs[$jobId] = $status;
+        }
+        // Leaving one school for the next isn't leaving early; only the day's last clock-out is.
+        $lastStop = !empty($in['last_stop']) ? 1 : 0;
+        $early = $lastStop && $open['work_date'] === today() && $now < strtotime(today() . ' ' . work_end());
         if ($early && $reason === '' && !in_array('no_gps', $flags, true)) {
             clock_fail('early_reason', 'Work ends at ' . work_end() . '. Say why you\'re leaving early.');
         }
@@ -448,17 +558,23 @@ function act_clock(array $in, array $me): void
     [$site, $dist] = nearest_site($lat, $lng);
     db()->beginTransaction();
     if ($action === 'in') {
-        q('INSERT INTO attendance (user_id, work_date, in_at, in_lat, in_lng, in_acc, in_site, in_dist, in_gps_ts, in_skew, in_reason, flags, source, created_at)
-            VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,\'app\',NOW())',
-            [$me['id'], today(), $lat, $lng, $acc, $site, $dist, $gpsAt, $skew, $reason, implode(',', $flags)]);
+        q('INSERT INTO attendance (user_id, work_date, in_at, in_lat, in_lng, in_acc, in_site, in_dist, in_gps_ts, in_skew, in_reason, flags,
+            client_id, location, source, created_at) VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,\'app\',NOW())',
+            [$me['id'], today(), $lat, $lng, $acc, $site, $dist, $gpsAt, $skew, $reason, implode(',', $flags), $clientId, $location]);
         $id = (int)db()->lastInsertId();
         save_uploads('attend', $id, $me['id']);
     } else {
         $id = (int)$open['id'];
         $allFlags = implode(',', array_unique(array_filter(array_merge(explode(',', (string)$open['flags']), $flags))));
         q('UPDATE attendance SET out_at = NOW(), out_lat = ?, out_lng = ?, out_acc = ?, out_site = ?, out_dist = ?, out_gps_ts = ?, out_skew = ?,
-            out_reason = ?, flags = ? WHERE id = ?', [$lat, $lng, $acc, $site, $dist, $gpsAt, $skew, $reason, $allFlags, $id]);
+            out_reason = ?, flags = ?, work_type = ?, work_note = ?, last_stop = ? WHERE id = ?',
+            [$lat, $lng, $acc, $site, $dist, $gpsAt, $skew, $reason, $allFlags, $workType, $workNote, $lastStop, $id]);
         save_uploads('attendout', $id, $me['id']);
+        $place = attendance_row($open)['location_label'] ?: 'site';
+        foreach ($jobs as $jobId => $status) {
+            q('INSERT IGNORE INTO attendance_jobs (attendance_id, job_id) VALUES (?, ?)', [$id, $jobId]);
+            log_job_work($jobId, $status, 'visit', "Worked on this at $place ($workType): $workNote", $me['id']);
+        }
     }
     db()->commit();
     touch_change();
@@ -526,7 +642,9 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
                 $st['missed_out'] += $missed ? 1 : 0;
                 $day += ['in' => $first['in_at'], 'out' => $last['out_at'], 'minutes' => $mins, 'late' => $late, 'late_min' => $late ? $first['late_min'] : 0,
                     'early' => $early, 'missed_out' => $missed, 'in_reason' => $first['in_reason'] ?? '', 'out_reason' => $last['out_reason'] ?? '',
-                    'site' => $first['in_site'], 'flags' => $first['flags'] ?? ''];
+                    'site' => $first['location_label'],
+                    'flags' => implode(',', array_unique(array_filter(explode(',', implode(',', array_column($recs, 'flags')))))),
+                    'visits' => count($recs), 'locations' => array_values(array_unique(array_filter(array_column($recs, 'location_label'))))];
                 $day['status'] = $missed ? 'missed' : (!$isWork ? 'extra' : ($late ? 'late' : 'present'));
             } elseif ($isWork && $date <= $end && $date >= $since) {
                 $st['absent']++;
@@ -599,8 +717,8 @@ function attendance_with_photos(array $rows): array
     $ids = array_column($rows, 'id');
     $in = attachments_for('attend', $ids);
     $out = attachments_for('attendout', $ids);
+    $rows = attendance_visits(array_map('attendance_row', $rows));
     foreach ($rows as &$r) {
-        $r = attendance_row($r);
         $r['in_photo'] = $in[$r['id']][0]['id'] ?? null;
         $r['out_photo'] = $out[$r['id']][0]['id'] ?? null;
     }
@@ -609,7 +727,7 @@ function attendance_with_photos(array $rows): array
 
 const ATT_COLS = 'a.id, a.user_id, u.name AS user_name, a.work_date, a.in_at, a.in_lat, a.in_lng, a.in_acc, a.in_site, a.in_dist,
     a.out_at, a.out_lat, a.out_lng, a.out_acc, a.out_site, a.out_dist, a.note, a.source, a.in_reason, a.out_reason, a.flags, a.out_missed,
-    a.in_gps_ts, a.in_skew';
+    a.in_gps_ts, a.in_skew, a.location, a.client_id, a.work_type, a.work_note, a.last_stop';
 
 /** Admin: one day's register (everyone, including who hasn't clocked in) or a date range. Staff: their own history. */
 function act_attendance_list(array $in, array $me): void
@@ -666,14 +784,20 @@ function act_attendance_edit(array $in, array $me): void
     if ($note === '') {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => ['note' => 'Say why this is being changed.']], 422);
     }
+    $location = str_in($in['location'] ?? ($old['location'] ?? ''), 120);
+    $clientId = $location !== '' ? (q('SELECT id FROM clients WHERE name = ?', [$location])->fetchColumn() ?: null) : null;
+    $workType = in_array($in['work_type'] ?? '', work_types(), true) ? $in['work_type'] : (string)($old['work_type'] ?? '');
+    $workNote = array_key_exists('work_note', $in) ? str_in($in['work_note'], 2000) : (string)($old['work_note'] ?? '');
     if ($old) {
         q('UPDATE attendance SET in_at = ?, out_at = ?, out_missed = 0, flags = TRIM(BOTH \',\' FROM CONCAT(flags, \',admin_edit\')),
-            note = TRIM(CONCAT(COALESCE(note, \'\'), ?)), edited_by = ? WHERE id = ?',
-            [$inAt, $outAt, "\nAdmin: " . $note, $me['id'], $id]);
-        audit('attendance_edit', 'attendance', $id, ['in' => [$old['in_at'], $inAt], 'out' => [$old['out_at'], $outAt], 'note' => $note]);
+            note = TRIM(CONCAT(COALESCE(note, \'\'), ?)), edited_by = ?, location = ?, client_id = ?, work_type = ?, work_note = ? WHERE id = ?',
+            [$inAt, $outAt, "\nAdmin: " . $note, $me['id'], $location, $clientId, $workType, $workNote, $id]);
+        audit('attendance_edit', 'attendance', $id, ['in' => [$old['in_at'], $inAt], 'out' => [$old['out_at'], $outAt],
+            'location' => [$old['location'], $location], 'note' => $note]);
     } else {
-        q('INSERT INTO attendance (user_id, work_date, in_at, out_at, note, flags, source, edited_by, created_at) VALUES (?,?,?,?,?,\'admin_edit\',\'admin\',?,NOW())',
-            [$uid, $date, $inAt, $outAt, 'Admin: ' . $note, $me['id']]);
+        q('INSERT INTO attendance (user_id, work_date, in_at, out_at, note, flags, source, edited_by, location, client_id, work_type, work_note, created_at)
+            VALUES (?,?,?,?,?,\'admin_edit\',\'admin\',?,?,?,?,?,NOW())',
+            [$uid, $date, $inAt, $outAt, 'Admin: ' . $note, $me['id'], $location, $clientId, $workType, $workNote]);
         $id = (int)db()->lastInsertId();
         audit('attendance_add', 'attendance', $id, ['user' => $uid, 'date' => $date, 'note' => $note]);
     }
@@ -697,12 +821,13 @@ function act_attendance_export(array $in, array $me): void
     header('Content-Disposition: attachment; filename="attendance-' . $from . '-to-' . $to . '.csv"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['Date', 'Staff', 'Arrived', 'Left', 'Hours', 'Late', 'Arrival site', 'Distance (m)', 'Arrival GPS', 'Leaving GPS', 'Source', 'Notes']);
-    foreach ($rows as $r) {
-        $r = attendance_row($r);
+    fputcsv($out, ['Date', 'Staff', 'Location', 'Arrived', 'Left', 'Hours', 'Late', 'Left early', 'Work type', 'Work done', 'Job orders', 'Flags',
+        'Nearest GPS site', 'Distance (m)', 'Arrival GPS', 'Leaving GPS', 'Source', 'Notes']);
+    foreach (attendance_visits(array_map('attendance_row', $rows)) as $r) {
         fputcsv($out, array_map(fn($x) => csv_safe((string)$x), [
-            $r['work_date'], $r['user_name'], substr($r['in_at'], 11, 5), $r['out_at'] ? substr($r['out_at'], 11, 5) : '',
-            $r['minutes'] !== null ? round($r['minutes'] / 60, 2) : '', $r['late'] ? 'Yes' : 'No', $r['in_site'], $r['in_dist'] ?? '',
+            $r['work_date'], $r['user_name'], $r['location_label'], substr($r['in_at'], 11, 5), $r['out_at'] ? substr($r['out_at'], 11, 5) : '',
+            $r['minutes'] !== null ? round($r['minutes'] / 60, 2) : '', $r['late'] ? 'Yes' : 'No', $r['early'] ? 'Yes' : 'No',
+            $r['work_type'], $r['work_note'] ?? '', implode(' ', array_column($r['jobs'], 'ref')), $r['flags'], $r['in_site'], $r['in_dist'] ?? '',
             $r['in_lat'] !== null ? $r['in_lat'] . ',' . $r['in_lng'] : '', $r['out_lat'] !== null ? $r['out_lat'] . ',' . $r['out_lng'] : '',
             $r['source'], $r['note'],
         ]));

@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -224,6 +224,12 @@ function table_sql(): array
             KEY idx_user_date (user_id, work_date),
             KEY idx_date (work_date)
         ) $t",
+        "CREATE TABLE IF NOT EXISTS attendance_jobs (
+            attendance_id INT UNSIGNED NOT NULL,
+            job_id INT UNSIGNED NOT NULL,
+            PRIMARY KEY (attendance_id, job_id),
+            KEY idx_job (job_id)
+        ) $t",
         "CREATE TABLE IF NOT EXISTS clients (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(190) NOT NULL UNIQUE,
@@ -350,6 +356,59 @@ function table_sql(): array
             k VARCHAR(60) PRIMARY KEY,
             v MEDIUMTEXT NOT NULL
         ) $t",
+        // v8: lesson delivery evidence. A plan is one topic/project prepared once; each class taught is a session.
+        "CREATE TABLE IF NOT EXISTS lesson_plans (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            client_id INT UNSIGNED NULL,
+            school VARCHAR(190) NOT NULL DEFAULT '',
+            subject VARCHAR(120) NOT NULL DEFAULT '',
+            topic VARCHAR(190) NOT NULL,
+            project_title VARCHAR(190) NOT NULL DEFAULT '',
+            objectives TEXT NULL,
+            activities TEXT NULL,
+            materials TEXT NULL,
+            planned_date DATE NULL,
+            planned_time CHAR(5) NOT NULL DEFAULT '',
+            status VARCHAR(10) NOT NULL DEFAULT 'submitted',
+            submitted_at DATETIME NOT NULL,
+            review_note VARCHAR(2000) NOT NULL DEFAULT '',
+            reviewed_by INT UNSIGNED NULL,
+            reviewed_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            KEY idx_user (user_id, planned_date),
+            KEY idx_status (status)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS lesson_sessions (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            plan_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            client_id INT UNSIGNED NULL,
+            school VARCHAR(190) NOT NULL DEFAULT '',
+            class_name VARCHAR(120) NOT NULL,
+            session_date DATE NOT NULL,
+            attendance_id INT UNSIGNED NULL,
+            students_total INT NULL,
+            students_present INT NULL,
+            students_completed INT NULL,
+            outcome VARCHAR(20) NOT NULL DEFAULT '',
+            achieved TEXT NULL,
+            challenges TEXT NULL,
+            support_needed TEXT NULL,
+            flags VARCHAR(120) NOT NULL DEFAULT '',
+            status VARCHAR(10) NOT NULL DEFAULT 'submitted',
+            cancel_reason VARCHAR(500) NOT NULL DEFAULT '',
+            review_note VARCHAR(2000) NOT NULL DEFAULT '',
+            reviewed_by INT UNSIGNED NULL,
+            reviewed_at DATETIME NULL,
+            delivered_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_plan (plan_id),
+            KEY idx_user_date (user_id, session_date),
+            KEY idx_date (session_date),
+            KEY idx_status (status)
+        ) $t",
     ];
 }
 
@@ -385,6 +444,12 @@ function column_sql(): array
         ['users', 'schools', 'TEXT NULL'],
         // v5: payroll
         ['users', 'salary', 'DECIMAL(12,2) NOT NULL DEFAULT 0'],
+        // v7: one clock-in per location visit, with the work done tagged at clock-out
+        ['attendance', 'client_id', 'INT UNSIGNED NULL'],
+        ['attendance', 'location', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['attendance', 'work_type', "VARCHAR(60) NOT NULL DEFAULT ''"],
+        ['attendance', 'work_note', 'TEXT NULL'],
+        ['attendance', 'last_stop', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ];
 }
 

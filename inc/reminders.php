@@ -191,6 +191,36 @@ function build_admin_digest(array $rs): array
                 . $line('No clock-out', $missed, fn($r) => htmlspecialchars($r['name'])), count($late) + count($absent) + count($missed));
             $count += count($late) + count($absent) + count($missed);
         }
+        // Clock-ins at a school the staff member isn't assigned to, or far from the school they chose.
+        $odd = q("SELECT a.location, a.flags, a.in_at, u.name FROM attendance a JOIN users u ON u.id = a.user_id
+            WHERE a.work_date = ? AND (FIND_IN_SET('far', a.flags) OR FIND_IN_SET('unassigned', a.flags)) ORDER BY u.name, a.in_at", [$day])->fetchAll();
+        if ($odd) {
+            $items = array_map(fn($r) => '<li>' . htmlspecialchars($r['name']) . ' at ' . htmlspecialchars($r['location']) . ', ' . date('g:ia', strtotime($r['in_at']))
+                . ' (' . implode(', ', array_intersect_key(['far' => 'far from the school', 'unassigned' => 'not assigned there'],
+                    array_flip(explode(',', $r['flags'])))) . ')</li>', $odd);
+            $html .= digest_section('Clock-ins to check', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($odd));
+            $count += count($odd);
+        }
+        // Lesson delivery: teaching visits with no class logged, and classes prepared only after arriving.
+        $gaps = teaching_visits_without_evidence($day, $day);
+        $late = q("SELECT s.school, s.class_name, u.name FROM lesson_sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.session_date = ? AND FIND_IN_SET('prep_late', s.flags) ORDER BY u.name", [$day])->fetchAll();
+        if ($gaps || $late) {
+            $items = array_merge(
+                array_map(fn($g) => '<li>' . htmlspecialchars($g['user_name']) . ' taught at ' . htmlspecialchars($g['location']) . ' but logged no class</li>', $gaps),
+                array_map(fn($s) => '<li>' . htmlspecialchars($s['name']) . ': ' . htmlspecialchars($s['class_name']) . ' at ' . htmlspecialchars($s['school'])
+                    . ' was prepared only after arriving</li>', $late));
+            $html .= digest_section('Lessons without evidence', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($items));
+            $count += count($items);
+        }
+    }
+
+    $review = lesson_badge(['role' => 'admin']);
+    if ($review) {
+        $html .= digest_section('Lessons to review', '<p style="font-size:13px;margin:4px 0">' . $review . ' lesson plan' . ($review === 1 ? '' : 's')
+            . ' or class record' . ($review === 1 ? '' : 's') . ' waiting for you on the Lessons page.</p>', $review);
+        $count += $review;
+        $summary[] = $review . ' lesson' . ($review === 1 ? '' : 's') . ' to review';
     }
 
     // Overtime claims waiting for the admin's decision before they reach payroll.
@@ -228,6 +258,12 @@ function build_staff_digest(int $uid): array
             $html .= digest_section($title, digest_job_rows($list, false), count($list));
             $count += count($list);
         }
+    }
+    $returned = lesson_badge(['id' => $uid, 'role' => 'staff']);
+    if ($returned) {
+        $html .= digest_section('Lessons returned to you', '<p style="font-size:13px">' . $returned . ' lesson plan or class record'
+            . ($returned === 1 ? ' was' : 's were') . ' returned. Open Lessons in the portal, fix them and resubmit.</p>', $returned);
+        $count += $returned;
     }
     $missed = q('SELECT work_date FROM attendance WHERE user_id = ? AND out_missed = 1 AND work_date >= ? ORDER BY work_date DESC',
         [$uid, date('Y-m-d', strtotime('-3 days'))])->fetchAll(PDO::FETCH_COLUMN);

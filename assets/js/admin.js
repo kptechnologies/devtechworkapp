@@ -334,6 +334,8 @@
           ${list('credit_types', 'Payment types', 'One per line, e.g. Daily allowance, Work budget, Top-up.')}
           ${list('company_expense_categories', 'Company expense categories', 'One per line. Used for company wallet expenses, e.g. Inverter installation, CCTV installation, Procurement.')}
           ${list('project_categories', 'Project types', 'One per line. The kinds of contract work you take on.')}
+          ${list('lesson_subjects', 'Lesson subjects', 'One per line, e.g. Coding, Robotics. Staff pick one for each lesson plan.')}
+          ${list('class_levels', 'Classes / grades', 'One per line, e.g. Grade 1 … Grade 6, JSS1. Suggested when staff log the classes they taught.')}
           <div class="field"><label for="se-al">Default daily allowance (${esc(App.cfg.currency)})</label><input type="number" id="se-al" name="daily_allowance_default" value="${esc(s.daily_allowance_default || '')}" min="0" step="0.01"><div class="help">Pre-fills the amount on Send payment.</div></div>
           <button class="btn primary" type="submit">Save lists</button></form>
         <form class="card card-pad" id="se-smtp"><h3 style="margin-bottom:4px">Email notifications</h3>
@@ -445,7 +447,8 @@
       const split = (v) => v.split('\n').map((x) => x.trim()).filter(Boolean);
       try {
         await App.busy(e.submitter, () => api('settings_save', { data: { locations: split(d.locations), expense_categories: split(d.expense_categories), credit_types: split(d.credit_types),
-          company_expense_categories: split(d.company_expense_categories), project_categories: split(d.project_categories), daily_allowance_default: d.daily_allowance_default } }));
+          company_expense_categories: split(d.company_expense_categories), project_categories: split(d.project_categories),
+          lesson_subjects: split(d.lesson_subjects), class_levels: split(d.class_levels), daily_allowance_default: d.daily_allowance_default } }));
         Object.assign(App.cfg, { locations: split(d.locations), categories: split(d.expense_categories), credit_types: split(d.credit_types), allowance: +d.daily_allowance_default || 0 });
         const sess = await api('session');
         App.cfg = sess.config;

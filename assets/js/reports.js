@@ -196,11 +196,28 @@
     if (!id || !isAdmin()) {
       try { App.myJobs = (await api('jobs_list', { query: { mine: 1, open: 1 } })).items; } catch { /* optional */ }
     }
-    if (!id && data.report_date === App.cfg.today && (!data.check_in || !data.check_out)) {
+    // Today's visits pre-fill the hours (first clock-in, last clock-out), the school, the work and the job orders tagged.
+    if (!id && data.report_date === App.cfg.today) {
       try {
-        const a = (await api('attendance_today')).record;
-        if (a && !data.check_in) data.check_in = a.in_at.slice(11, 16);
-        if (a?.out_at && !data.check_out) data.check_out = a.out_at.slice(11, 16);
+        const today = await api('attendance_today');
+        const visits = today.visits || [];
+        // Classes logged on the Lessons page fill the lesson section.
+        const lessons = today.lessons || [];
+        if (lessons.length) {
+          if (!data.classes_taught) data.classes_taught = String(lessons.length);
+          if (!data.classes_list) data.classes_list = lessons.map((s) => `${s.class_name} ${s.subject}`).join(', ');
+          if (!data.topics) data.topics = [...new Set(lessons.map((s) => s.topic))].join('; ');
+        }
+        const first = visits[0];
+        const last = visits[visits.length - 1];
+        if (first && !data.check_in) data.check_in = first.in_at.slice(11, 16);
+        if (last?.out_at && !data.check_out) data.check_out = last.out_at.slice(11, 16);
+        if (first?.location && !data.location) data.location = first.location;
+        const types = [...new Set(visits.map((v) => v.work_type).filter((t) => (App.cfg.duties || []).includes(t)))];
+        if (types.length && !data.duties?.length) data.duties = types;
+        if (lessons.length && !data.duties?.includes(App.cfg.duties[0])) data.duties = (data.duties || []).concat(App.cfg.duties[0]);
+        const tagged = new Set(visits.flatMap((v) => (v.jobs || []).map((j) => j.id)));
+        if (tagged.size && !data.jobs_worked?.length) data.jobs_worked = App.myJobs.filter((j) => tagged.has(j.id)).map((j) => `${j.ref} · ${j.title}`);
       } catch { /* optional */ }
     }
     let step = 0;

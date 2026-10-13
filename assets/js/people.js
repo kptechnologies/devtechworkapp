@@ -28,38 +28,145 @@
     });
   }
   const todayAt = (hm) => { const [h, m] = hm.split(':').map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return d; };
+  /** Metres between two GPS points. */
+  const metres = (a, b) => {
+    const rad = (d) => d * Math.PI / 180;
+    const x = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+    return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
+  };
+  const isOffice = (name) => /^(office|other)\b/i.test(name);
+  const lower = (s) => String(s).toLowerCase();
 
   /**
    * Strict clock in/out: a selfie taken now, a GPS fix taken when the button is pressed (its timestamp is checked
    * against the press time on the server), and a reason when late, leaving early or without location.
+   * Each clock-in is one visit to a school; clocking out says what work was done there. Only the day's first
+   * clock-in can be late and only the clock-out marked "last location today" can be early.
    */
   function clockDialog(action, info, onDone) {
     const isIn = action === 'in';
     const cfg = App.cfg;
-    const late = isIn && Date.now() >= todayAt(cfg.work_start).getTime() + ((cfg.late_grace || 0) + 1) * 60000;
-    const early = !isIn && info.open?.work_date === cfg.today && Date.now() < todayAt(cfg.work_end).getTime();
+    const firstToday = !(info.visits || []).length;
+    const late = isIn && firstToday && Date.now() >= todayAt(cfg.work_start).getTime() + ((cfg.late_grace || 0) + 1) * 60000;
+    const beforeEnd = !isIn && info.open?.work_date === cfg.today && Date.now() < todayAt(cfg.work_end).getTime();
+    const radius = info.site_radius || 300;
+    const mine = info.my_schools || [];
+    const mineLower = mine.map(lower);
     let photo = null;
     let selfieTs = null;
     let noGps = false;
-    const reasonLabel = late ? `You're late (work starts at ${cfg.work_start}). Why?` : early ? `Work ends at ${cfg.work_end}. Why are you leaving early?` : 'Note (optional)';
-    const el = App.modal(isIn ? 'Clock in' : 'Clock out', `
+    let jobs = [];
+
+    const locOpts = () => {
+      const all = cfg.locations || [];
+      const assigned = mine.filter((s) => all.some((a) => lower(a) === lower(s)));
+      const office = all.filter((n) => isOffice(n));
+      const rest = all.filter((n) => !isOffice(n) && !mineLower.includes(lower(n)));
+      return (assigned.length ? `<optgroup label="My schools">${App.opts(assigned, '')}</optgroup>` : '')
+        + (office.length ? `<optgroup label="Office">${App.opts(office, '')}</optgroup>` : '')
+        + (rest.length ? `<optgroup label="Other schools">${App.opts(rest, '')}</optgroup>` : '');
+    };
+    const reasonLabel = () => {
+      if (late) return `You're late (work starts at ${cfg.work_start}). Why?`;
+      if (early()) return `Work ends at ${cfg.work_end}. Why are you leaving early?`;
+      return 'Note (optional)';
+    };
+    const early = () => beforeEnd && !!$('#ck-last', el)?.checked;
+    const lastDefault = !isIn && Date.now() >= todayAt(cfg.work_end).getTime() - 60 * 60000;
+
+    const el = App.modal(isIn ? (firstToday ? 'Clock in' : 'Clock in at next location') : `Clock out of ${info.open?.location_label || 'this location'}`, `
       ${!window.isSecureContext ? '<div class="note-box bad" style="margin-bottom:12px">This page isn\'t on HTTPS, so the phone won\'t share location or open the camera. Ask your admin to turn on HTTPS.</div>' : ''}
       <form id="ck-form" novalidate>
+      ${isIn ? `<div class="field" data-field="location"><label for="ck-where">Where are you? <span class="req">*</span></label>
+        <select id="ck-where" name="location"><option value="">Choose the school or location…</option>${locOpts()}</select>
+        <div class="help" id="ck-where-help">Finding the nearest school…</div></div>` : `
+        <div class="field" data-field="jobs"><div class="label">Job orders you worked on here</div><div id="ck-jobs" class="small muted">Loading your job orders…</div></div>
+        <div class="field" data-field="work_type"><label for="ck-type">Type of work <span class="req">*</span></label>
+          <select id="ck-type" name="work_type">${App.opts(info.work_types || [], '', { placeholder: 'Choose…' })}</select></div>
+        <div class="note-box warn hide" id="ck-lesson" style="margin-bottom:12px"><i class="ti ti-school"></i> You haven't logged the classes you taught here today.
+          <a href="#/lessons/log" data-close>Log them now</a> with photos of the pupils at work and their projects.</div>
+        <div class="field" data-field="work_note"><label for="ck-note">What did you do here? <span class="req">*</span></label>
+          <textarea id="ck-note" name="work_note" rows="3" placeholder="e.g. Fixed 4 projectors in the ICT lab; trained JSS2 teachers on Google Classroom"></textarea></div>
+        <label class="check-row" style="margin-bottom:12px"><input type="checkbox" id="ck-last" name="last_stop" ${lastDefault ? 'checked' : ''}><span>This is my last location today</span></label>`}
       <div class="field" data-field="selfie"><div class="label">Selfie <span class="req">*</span></div>
         <label class="selfie" id="ck-selfie"><input type="file" accept="image/*" capture="user" class="sr">
           <span><i class="ti ti-camera" style="font-size:28px"></i><br>Tap to take a selfie now</span></label></div>
       <div class="field"><div class="label">Location</div><div id="ck-loc" class="note-box"><i class="ti ti-map-pin"></i> Your location is read when you press the button, so it's fresh.</div></div>
-      <div class="field" data-field="reason"><label for="ck-reason">${esc(reasonLabel)} ${late || early ? '<span class="req">*</span>' : ''}</label>
+      <div class="field" data-field="reason"><label for="ck-reason" id="ck-reason-label"></label>
         <input id="ck-reason" name="reason" placeholder="${isIn ? 'e.g. Traffic at Garriki; went to Mayday first' : 'e.g. Going to a site visit at Soar High'}"></div>
       </form>`,
     `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ck-ok"><i class="ti ti-${isIn ? 'login' : 'logout'}"></i>${isIn ? 'Clock in now' : 'Clock out now'}</button>`);
     const form = $('#ck-form', el);
     const locBox = $('#ck-loc', el);
     const input = $('#ck-selfie input', el);
-    // Ask for location permission early so the press itself is quick; this reading isn't used.
-    getPosition().then((p) => {
-      if (p.error && locBox.isConnected) { noGps = true; locBox.className = 'note-box warn'; locBox.textContent = p.error + ' You can still continue if you say where you are below.'; }
+    const drawReason = () => {
+      const need = late || early();
+      $('#ck-reason-label', el).innerHTML = `${esc(reasonLabel())} ${need ? '<span class="req">*</span>' : ''}`;
+    };
+    drawReason();
+    $('#ck-last', el)?.addEventListener('change', drawReason);
+    // Lesson delivery needs class evidence on the Lessons page: remind (don't block) when none was logged at this school today.
+    $('#ck-type', el)?.addEventListener('change', (e) => {
+      const here = lower(info.open?.location_label || '');
+      const logged = (info.lessons || []).some((s) => lower(s.school) === here);
+      $('#ck-lesson', el).classList.toggle('hide', e.target.value !== cfg.duties?.[0] || logged);
     });
+
+    // Which school is this GPS fix at? Prefer the staff member's own schools, then any school with a GPS point.
+    let lastFix = null;
+    const whereHelp = () => {
+      const help = $('#ck-where-help', el);
+      if (!help) return;
+      const name = form.location.value;
+      const site = name && (info.sites || []).find((s) => lower(s.name) === lower(name));
+      const bits = [];
+      if (name && !isOffice(name) && !mineLower.includes(lower(name))) bits.push('<span class="pill out">Not one of your schools</span> Your admin will see this.');
+      if (site && lastFix) {
+        const d = metres(lastFix, site);
+        bits.push(d > radius ? `<span class="pill out">Far</span> You seem to be ${d < 1000 ? d + 'm' : (d / 1000).toFixed(1) + 'km'} from ${esc(site.name)}.` : `You're at ${esc(site.name)} (${d}m).`);
+      }
+      help.innerHTML = bits.join(' ') || (lastFix ? 'Choose where you are.' : noGps ? 'Your location couldn\'t be read, so choose where you are.' : 'Finding the nearest school…');
+    };
+    const suggest = (fix) => {
+      if (!isIn || form.location.value) return;
+      const ranked = (info.sites || []).map((s) => ({ name: s.name, d: metres(fix, s) })).filter((s) => s.d <= radius).sort((a, b) => a.d - b.d);
+      const pick = ranked.find((s) => mineLower.includes(lower(s.name))) || ranked[0];
+      const option = pick && [...form.location.options].find((o) => lower(o.value) === lower(pick.name));
+      if (option) form.location.value = option.value;
+      else if (mine.length === 1) form.location.value = [...form.location.options].find((o) => lower(o.value) === lower(mine[0]))?.value || '';
+    };
+    form.location?.addEventListener('change', whereHelp);
+
+    // Ask for location permission early so the press itself is quick; this reading only pre-selects the school.
+    getPosition().then((p) => {
+      if (!locBox.isConnected) return;
+      if (p.error) {
+        noGps = true;
+        locBox.className = 'note-box warn';
+        locBox.textContent = p.error + ' You can still continue if you say where you are below.';
+        if (isIn && mine.length === 1 && !form.location.value) form.location.value = [...form.location.options].find((o) => lower(o.value) === lower(mine[0]))?.value || '';
+      } else {
+        lastFix = p;
+        suggest(p);
+      }
+      whereHelp();
+    });
+
+    if (!isIn) {
+      // The staff member's open job orders, with the ones at this school first.
+      const here = lower(info.open?.location_label || '');
+      api('jobs_list', { query: { mine: 1, open: 1 } }).then((r) => {
+        jobs = r.items.filter((j) => j.assignees.some((a) => a.id === App.user.id));
+        jobs.sort((a, b) => (lower(b.client_name) === here) - (lower(a.client_name) === here));
+        const box = $('#ck-jobs', el);
+        if (!box) return;
+        box.className = '';
+        box.innerHTML = jobs.length ? jobs.map((j) => `<label class="check-row"><input type="checkbox" name="jobs" value="${j.id}">
+            <span><b>${esc(j.ref)}</b> ${esc(j.title)} <span class="faint small">· ${esc(j.client_name)}</span></span></label>`).join('')
+          : '<span class="small muted">You have no open job orders. Just describe the work below.</span>';
+      }).catch(() => { const box = $('#ck-jobs', el); if (box) box.textContent = 'Couldn\'t load your job orders.'; });
+    }
+
     input.addEventListener('change', async () => {
       const f = input.files[0];
       if (!f) return;
@@ -76,6 +183,11 @@
       locBox.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:-2px"></span> Getting a fresh location…';
       const pos = await getPosition();
       const data = { action, reason, client_ts: Date.now(), selfie_ts: selfieTs };
+      if (isIn) data.location = form.location.value;
+      else {
+        Object.assign(data, { work_type: form.work_type.value, work_note: form.work_note.value.trim(), last_stop: $('#ck-last', el).checked ? 1 : 0,
+          jobs: $$('input[name="jobs"]:checked', form).map((i) => +i.value) });
+      }
       if (pos.error) {
         noGps = true;
         locBox.className = 'note-box warn';
@@ -88,22 +200,33 @@
       try {
         const r = await api('clock', { data, files: [photo] });
         App.closeTop();
-        toast(isIn ? `Clocked in at ${timeOf(r.record.in_at)}` : `Clocked out at ${timeOf(r.record.out_at)}`);
+        toast(isIn ? `Clocked in at ${r.record.location_label || 'work'}, ${timeOf(r.record.in_at)}` : `Clocked out at ${timeOf(r.record.out_at)}`);
         onDone && onDone();
       } catch (err) {
         if (err.code === 'stale_gps' && attempt < 2) return send(btn, attempt + 1); // cached fix: try once more
         if (err.code === 'late_reason' || err.code === 'early_reason' || err.code === 'no_gps') App.showErrors(form, { reason: err.message });
         else if (err.code === 'selfie' || err.code === 'old_selfie') App.showErrors(form, { selfie: err.message });
+        else if (err.code === 'location') App.showErrors(form, { location: err.message });
+        else if (err.code === 'work_tag') App.showErrors(form, { work_note: err.message });
         App.fail(err);
       }
     };
     $('#ck-ok', el).addEventListener('click', async (e) => {
       App.showErrors(form, null);
-      if (!photo) { App.showErrors(form, { selfie: 'Take a selfie now.' }); return; }
-      if ((late || early) && !form.reason.value.trim()) { App.showErrors(form, { reason: late ? 'Say why you\'re late.' : 'Say why you\'re leaving early.' }); return; }
+      const errs = {};
+      if (isIn && !form.location.value) errs.location = 'Choose where you are.';
+      if (!isIn && !form.work_type.value) errs.work_type = 'Choose the type of work.';
+      if (!isIn && form.work_note.value.trim().length < (info.work_note_min || 10)) errs.work_note = 'Say what you did here in a sentence.';
+      if (!photo) errs.selfie = 'Take a selfie now.';
+      if ((late || early()) && !form.reason.value.trim()) errs.reason = late ? 'Say why you\'re late.' : 'Say why you\'re leaving early.';
+      if (Object.keys(errs).length) { App.showErrors(form, errs); return; }
       await App.busy(e.currentTarget, () => send(e.currentTarget, 1));
     });
   }
+
+  /** One line per visit today: "School A 8:02am – 10:05am · Maintenance · JO-0012". */
+  const visitLine = (v) => `<li><b>${esc(v.location_label || 'Location')}</b> <span class="num">${esc(timeOf(v.in_at))} – ${v.out_at ? esc(timeOf(v.out_at)) : 'now'}</span>
+    ${v.work_type ? ` · ${esc(v.work_type)}` : ''}${v.jobs?.length ? ` · ${v.jobs.map((j) => esc(j.ref)).join(', ')}` : ''}</li>`;
 
   /** Clock card on the staff home page. */
   App.renderClockCard = async (box) => {
@@ -111,20 +234,25 @@
     let r;
     try { r = await api('attendance_today'); } catch { box.innerHTML = ''; return; }
     const open = r.open;
-    const today = r.record;
+    const visits = r.visits || [];
+    const done = visits.filter((v) => v.out_at);
+    const dayOver = done.some((v) => +v.last_stop);
     let tick = null;
     const draw = () => {
       if (!box.isConnected) { clearInterval(tick); return; }
+      const list = visits.length ? `<ul class="small muted" style="margin:8px 0 0;padding-left:18px">${visits.map(visitLine).join('')}</ul>` : '';
       if (open) {
         const mins = Math.max(0, Math.round((Date.now() - new Date(open.in_at.replace(' ', 'T')).getTime()) / 60000));
-        box.innerHTML = `<div class="clock-card on"><div><div class="small muted">Clocked in at ${esc(timeOf(open.in_at))}${open.late ? ' <span class="pill out">Late</span>' : ''}</div>
-          <div class="clock-time">${hrs(mins)}</div><div class="small muted">${open.in_site ? 'Near ' + esc(open.in_site) : 'On duty'} · work ends ${esc(r.work_end)}</div></div>
-          <button class="btn danger solid" data-clock="out"><i class="ti ti-logout"></i>Clock out</button></div>`;
-      } else if (today?.out_at) {
-        box.innerHTML = `<div class="clock-card done"><div><div class="small muted">Today</div><div class="clock-time" style="font-size:18px">${esc(timeOf(today.in_at))} – ${esc(timeOf(today.out_at))}</div>
-          <div class="small muted">${hrs(today.minutes)} worked</div></div><button class="btn sm" data-clock="in"><i class="ti ti-login"></i>Clock in again</button></div>`;
+        box.innerHTML = `<div class="clock-card on"><div><div class="small muted">At ${esc(open.location_label || 'work')} since ${esc(timeOf(open.in_at))}${visits[0]?.late ? ' <span class="pill out">Late</span>' : ''}</div>
+          <div class="clock-time">${hrs(mins)}</div><div class="small muted">Work ends ${esc(r.work_end)}</div>${list}</div>
+          <button class="btn danger solid" data-clock="out"><i class="ti ti-logout"></i>Clock out here</button></div>`;
+      } else if (visits.length) {
+        const total = done.reduce((a, v) => a + (v.minutes || 0), 0);
+        box.innerHTML = `<div class="clock-card done"><div><div class="small muted">Today · ${visits.length} location${visits.length === 1 ? '' : 's'} · ${hrs(total)} on site</div>
+          <div class="clock-time" style="font-size:18px">${esc(timeOf(visits[0].in_at))} – ${esc(timeOf(visits[visits.length - 1].out_at))}</div>${list}</div>
+          <button class="btn sm ${dayOver ? '' : 'primary'}" data-clock="in"><i class="ti ti-login"></i>${dayOver ? 'Clock in again' : 'Clock in at next location'}</button></div>`;
       } else {
-        box.innerHTML = `<div class="clock-card"><div><div style="font-weight:600">You haven't clocked in today</div><div class="small muted">Work starts at ${esc(r.work_start)}. Take a selfie at your location.</div></div>
+        box.innerHTML = `<div class="clock-card"><div><div style="font-weight:600">You haven't clocked in today</div><div class="small muted">Work starts at ${esc(r.work_start)}. Take a selfie at your first location.</div></div>
           <button class="btn primary" data-clock="in"><i class="ti ti-login"></i>Clock in</button></div>`;
       }
       $('[data-clock]', box)?.addEventListener('click', (e) => clockDialog(e.currentTarget.dataset.clock, r, () => App.renderClockCard(box)));
@@ -134,7 +262,10 @@
   };
 
   /* ------------------------------------------------------- attendance */
-  const FLAG_TEXT = { no_gps: 'No GPS', admin_edit: 'Edited by admin' };
+  const FLAG_TEXT = { no_gps: 'No GPS', admin_edit: 'Edited by admin', far: 'Far from school', unassigned: 'Not assigned here' };
+  /** The work tagged at a clock-out: type, job orders and note. */
+  const visitTag = (x) => (x.work_type || x.jobs?.length || x.work_note ? `<div class="small" style="margin-top:4px"><i class="ti ti-tool"></i> ${esc(x.work_type || 'Work')}${x.jobs?.length
+    ? ' · ' + x.jobs.map((j) => `<a href="#/jobs/${j.id}" title="${esc(j.title)}">${esc(j.ref)}</a>`).join(', ') : ''}${x.work_note ? `<div class="muted" style="white-space:pre-wrap">${esc(x.work_note)}</div>` : ''}</div>` : '');
   const flagPills = (flags) => String(flags || '').split(',').filter(Boolean).map((f) => `<span class="pill out" title="${esc(FLAG_TEXT[f] || f)}">${esc(FLAG_TEXT[f] || f)}</span>`).join(' ');
   const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 
@@ -181,12 +312,12 @@
         </div>
         ${admin && single && r.absent.length ? `<div class="card card-pad" style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="muted small"><i class="ti ti-user-off"></i> Not clocked in:</span>${r.absent.map((s) => `<button class="pill bad" data-add="${s.id}" title="Add manually">${esc(s.name)}</button>`).join('')}</div>` : ''}
-        <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Where / why</th><th>Selfies</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
+        <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Location / work done</th><th>Selfies</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
           ${r.items.map((x) => `<tr>${single ? '' : `<td class="num">${esc(fmtDate(x.work_date, false))}</td>`}${admin ? `<td><a href="#/staff/${x.user_id}">${esc(x.user_name)}</a></td>` : ''}
             <td class="num">${esc(timeOf(x.in_at))} ${x.late && firstIns[x.user_id + x.work_date] === x ? `<span class="pill out">Late ${x.late_min}m</span>` : ''}</td>
             <td class="num">${x.out_at ? `${esc(timeOf(x.out_at))}${x.early ? ' <span class="pill out">Early</span>' : ''}` : x.missed_out ? '<span class="pill bad">No clock-out</span>' : '<span class="pill info">On site</span>'}</td>
             <td class="r num">${hrs(x.minutes)}</td>
-            <td class="small">${x.in_lat === null && x.source === 'admin' ? '' : where(x.in_site, x.in_dist, x.in_lat, x.in_lng)} ${flagPills(x.flags)}
+            <td class="small">${x.location ? `<div style="font-weight:500">${esc(x.location)}</div>` : ''}${x.in_lat === null && x.source === 'admin' ? '' : where(x.in_site, x.in_dist, x.in_lat, x.in_lng)} ${flagPills(x.flags)}${visitTag(x)}
               ${x.in_reason ? `<div class="small"><b>In:</b> ${esc(x.in_reason)}</div>` : ''}${x.out_reason ? `<div class="small"><b>Out:</b> ${esc(x.out_reason)}</div>` : ''}
               ${x.note ? `<div class="faint small" style="white-space:pre-wrap">${esc(x.note)}</div>` : ''}</td>
             <td><div class="gallery sm">${x.in_photo ? `<div class="thumb" data-file="${x.in_photo}" data-img="1" title="Clock-in selfie"><img src="file.php?id=${x.in_photo}&thumb=1" alt="Clock-in selfie" loading="lazy"></div>` : ''}${x.out_photo ? `<div class="thumb" data-file="${x.out_photo}" data-img="1" title="Clock-out selfie"><img src="file.php?id=${x.out_photo}&thumb=1" alt="Clock-out selfie" loading="lazy"></div>` : ''}</div></td>
@@ -300,6 +431,9 @@
           <div class="field"><label>Date</label><input type="date" name="work_date" value="${esc(rec.work_date)}"></div></div>` : ''}
         <div class="form-row"><div class="field"><label>Arrived</label><input type="time" name="in_time" value="${rec.in_at ? rec.in_at.slice(11, 16) : ''}"></div>
           <div class="field"><label>Left</label><input type="time" name="out_time" value="${rec.out_at ? rec.out_at.slice(11, 16) : ''}"></div></div>
+        <div class="form-row"><div class="field"><label>Location</label><select name="location">${App.opts(App.cfg.locations || [], rec.location || '', { placeholder: 'Not set' })}</select></div>
+          <div class="field"><label>Type of work</label><select name="work_type">${App.opts((App.cfg.duties || []).concat(['Other']), rec.work_type || '', { placeholder: 'Not set' })}</select></div></div>
+        <div class="field"><label>Work done</label><textarea name="work_note" rows="2">${esc(rec.work_note || '')}</textarea></div>
         <div class="field"><label>Reason <span class="req">*</span></label><input name="note" placeholder="e.g. Phone was off, confirmed with school"><div class="help">Saved with the record and in the audit log.</div></div>
       </form>`, '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ae-ok">Save</button>');
     $('#ae-ok', el).addEventListener('click', async (e) => {
@@ -443,7 +577,7 @@
   App.route('staff/:id', (ctx) => profileView(ctx, +ctx.params.id), { title: 'Staff profile', nav: 'staff', admin: true, live: true });
   App.route('profile', (ctx) => profileView(ctx, null), { title: 'Profile' });
 
-  const PTABS = [['details', 'Details', 'id'], ['tools', 'Tools', 'tools'], ['attendance', 'Attendance', 'clock'], ['jobs', 'Jobs', 'clipboard-list'], ['reports', 'Reports', 'clipboard-text'], ['wallet', 'Wallet', 'wallet'], ['queries', 'Queries', 'alert-triangle']];
+  const PTABS = [['details', 'Details', 'id'], ['tools', 'Tools', 'tools'], ['attendance', 'Attendance', 'clock'], ['jobs', 'Jobs', 'clipboard-list'], ['reports', 'Reports', 'clipboard-text'], ['wallet', 'Wallet', 'wallet'], ['queries', 'Queries', 'alert-triangle'], ['lessons', 'Lessons', 'school']];
 
   async function profileView(ctx, id) {
     const admin = isAdmin();
@@ -539,7 +673,7 @@
         ${p.attendance.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Where</th></tr></thead><tbody>
           ${p.attendance.map((x) => `<tr><td class="num">${esc(fmtDate(x.work_date, false))}</td><td class="num">${esc(timeOf(x.in_at))} ${x.late ? '<span class="pill out">Late</span>' : ''}</td>
             <td class="num">${x.out_at ? esc(timeOf(x.out_at)) : '<span class="pill info">On site</span>'}</td><td class="r num">${hrs(x.minutes)}</td>
-            <td class="small">${esc(x.in_site || (x.source === 'admin' ? 'Entered by admin' : ''))}${x.in_dist !== null && x.in_site ? ` · ${x.in_dist}m` : ''}</td></tr>`).join('')}</tbody></table></div>`
+            <td class="small">${esc(x.location_label || (x.source === 'admin' ? 'Entered by admin' : ''))} ${flagPills(x.flags)}${visitTag(x)}</td></tr>`).join('')}</tbody></table></div>`
           : App.empty('clock-off', 'No clock-ins yet')}</div>`;
     }
     if (tab === 'jobs') {
@@ -554,6 +688,7 @@
           <div class="main-col"><div class="t">${esc(fmtDate(x.report_date))}</div><div class="s">${esc(x.location)} · ${esc(x.work_type)}</div></div>${App.finishedPill(x.finished)}</li>`).join('')}</ul>`
           : App.empty('clipboard', 'No reports yet')}</div>`;
     }
+    if (tab === 'lessons') return `<div id="pl-box">${App.loading()}</div>`;
     if (tab === 'queries') {
       const warnings = p.queries.filter((x) => x.status === 'warning').length;
       return `<div class="card"><div class="card-head"><h3>Queries${warnings ? ` <span class="pill bad">${warnings} warning${warnings === 1 ? '' : 's'}</span>` : ''}</h3>
@@ -618,6 +753,7 @@
         .catch(() => { const box = $('#pt-cal', body); if (box) box.innerHTML = ''; });
     }
     if (tab === 'jobs') $$('[data-job]', body).forEach((li) => li.addEventListener('click', () => App.openJob(+li.dataset.job)));
+    if (tab === 'lessons') App.lessonStats?.($('#pl-box', body), p.user.id);
     if (tab === 'queries') {
       App.bindQueryList(body);
       $('#pq-new', body)?.addEventListener('click', () => App.queryForm({ user_id: p.user.id, name: p.user.name }));

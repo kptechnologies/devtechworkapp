@@ -196,6 +196,8 @@ function act_settings_get(array $in, array $me): void
         'credit_types' => setting('credit_types'),
         'company_expense_categories' => company_categories(),
         'project_categories' => project_categories(),
+        'lesson_subjects' => lesson_subjects(),
+        'class_levels' => class_levels(),
         'daily_allowance_default' => (float)setting('daily_allowance_default'),
         'work_start' => work_start(),
         'work_end' => work_end(),
@@ -212,7 +214,7 @@ function act_settings_get(array $in, array $me): void
 function act_settings_save(array $in, array $me): void
 {
     require_admin();
-    $lists = ['locations', 'expense_categories', 'credit_types', 'company_expense_categories', 'project_categories'];
+    $lists = ['locations', 'expense_categories', 'credit_types', 'company_expense_categories', 'project_categories', 'lesson_subjects', 'class_levels'];
     foreach ($lists as $k) {
         if (isset($in[$k])) {
             $vals = array_values(array_unique(array_filter(array_map(fn($x) => str_in($x, 120), (array)$in[$k]), 'strlen')));

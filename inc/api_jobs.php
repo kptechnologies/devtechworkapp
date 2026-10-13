@@ -533,10 +533,16 @@ function link_report_jobs(int $reportId, int $ownerId, array $data): void
         if (q('SELECT 1 FROM job_updates WHERE job_id = ? AND report_id = ?', [$jobId, $reportId])->fetchColumn()) {
             continue;
         }
-        job_log($jobId, 'report', 'Worked on this. See the daily report for ' . ($data['report_date'] ?? today()) . '.', $reportId, $ownerId);
-        if (in_array($status, ['open', 'returned'], true)) {
-            q("UPDATE jobs SET status = 'in_progress' WHERE id = ?", [$jobId]);
-        }
+        log_job_work($jobId, $status, 'report', 'Worked on this. See the daily report for ' . ($data['report_date'] ?? today()) . '.', $ownerId, $reportId);
+    }
+}
+
+/** Adds a "worked on this" timeline entry and moves an open or returned job to in progress. */
+function log_job_work(int $jobId, string $status, string $kind, string $body, int $userId, ?int $reportId = null): void
+{
+    job_log($jobId, $kind, $body, $reportId, $userId);
+    if (in_array($status, ['open', 'returned'], true)) {
+        q("UPDATE jobs SET status = 'in_progress' WHERE id = ?", [$jobId]);
     }
 }
 

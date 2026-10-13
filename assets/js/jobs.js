@@ -10,7 +10,7 @@
   const PRIORITY = { urgent: ['Urgent', 'bad'], high: ['High', 'out'], normal: ['Normal', ''], low: ['Low', ''] };
   const jobPill = (s) => { const [l, t] = JOB_STATUS[s] || [s, '']; return `<span class="pill ${t}">${esc(l)}</span>`; };
   const prioPill = (p) => (p === 'normal' || p === 'low' ? '' : `<span class="pill ${PRIORITY[p]?.[1] || ''}"><i class="ti ti-flag"></i>${esc(PRIORITY[p]?.[0] || p)}</span>`);
-  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', edit: 'edit', priority: 'flag' };
+  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag' };
 
   /** Finger/mouse signature pad. Returns { file: () => Promise<File|null>, clear, isEmpty }. */
   function signaturePad(canvas) {

@@ -426,6 +426,7 @@
         { label: 'Work' },
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports', mobile: true },
+        { href: 'lessons', icon: 'school', text: 'Lessons', badge: 'lessons' },
         { href: 'attendance', icon: 'clock-check', text: 'Attendance' },
         { href: 'clients', icon: 'building-community', text: 'Clients' },
         { href: 'issues', icon: 'layout-kanban', text: 'Issues board' },
@@ -443,6 +444,7 @@
       { href: 'wallet', icon: 'wallet', text: 'Wallet', mobile: true },
       { href: 'report/new', icon: 'clipboard-plus', text: 'New report', mobile: true },
       { href: 'jobs', icon: 'clipboard-list', text: 'My jobs', badge: 'jobs', mobile: true },
+      { href: 'lessons', icon: 'school', text: 'My lessons', badge: 'lessons' },
       { href: 'reports', icon: 'clipboard-text', text: 'My reports' },
       { href: 'attendance', icon: 'clock-check', text: 'My attendance' },
       { href: 'my-pay', icon: 'report-money', text: 'My pay' },
@@ -539,6 +541,7 @@
     if ('pending_overtime' in p) App.badges.payroll = p.pending_overtime;
     if ('jobs' in p) App.badges.jobs = p.jobs;
     if ('queries' in p) App.badges.queries = p.queries;
+    if ('lessons' in p) App.badges.lessons = p.lessons;
     $$('[data-badge]').forEach((b) => {
       const n = App.badges[b.dataset.badge] || 0;
       b.textContent = n;

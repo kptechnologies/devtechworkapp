@@ -11,6 +11,7 @@ require __DIR__ . '/inc/api_clients.php';
 require __DIR__ . '/inc/api_payroll.php';
 require __DIR__ . '/inc/company.php';
 require __DIR__ . '/inc/api_queries.php';
+require __DIR__ . '/inc/api_lessons.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -44,7 +45,8 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
     'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
-    'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get'];
+    'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
+    'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -94,6 +96,9 @@ function public_config(array $me): array
         'late_grace'    => late_grace(),
         'clients'       => client_names(),
         'query_categories' => QUERY_CATEGORIES,
+        'lesson_subjects' => lesson_subjects(),
+        'class_levels'  => class_levels(),
+        'lesson_outcomes' => LESSON_OUTCOMES,
     ] + (is_admin($me) ? [
         'company_categories' => company_categories(),
         'project_categories' => project_categories(),
@@ -186,6 +191,7 @@ function act_pulse(array $in, array $me): void
         'unread'  => (int)q('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL', [$me['id']])->fetchColumn(),
         'wallet'  => wallet_stats($me['id']),
         'queries' => query_badge($me),
+        'lessons' => lesson_badge($me),
     ] + job_badges($me);
     if (is_admin($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
@@ -234,6 +240,15 @@ function act_attachment_delete(array $in, array $me): void
         }
         if (in_array($a['owner_type'], ['attend', 'attendout'], true)) {
             fail('Clock-in photos can\'t be removed.', 403);
+        }
+        // Lesson evidence is locked once submitted, except while it is returned for fixing.
+        if (in_array($a['owner_type'], ['lprep', 'lplan'], true)
+            && q('SELECT status FROM lesson_plans WHERE id = ?', [$a['owner_id']])->fetchColumn() !== 'returned') {
+            fail('Lesson plan files can only be changed while the plan is returned to you.', 403);
+        }
+        if (in_array($a['owner_type'], ['lclass', 'lwork'], true)
+            && q('SELECT status FROM lesson_sessions WHERE id = ?', [$a['owner_id']])->fetchColumn() !== 'returned') {
+            fail('Class photos can only be changed while the class is returned to you.', 403);
         }
         if ($a['owner_type'] === 'jobnote') {
             $st = q('SELECT j.status FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ?', [$a['owner_id']])->fetchColumn();
