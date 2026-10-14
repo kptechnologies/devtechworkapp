@@ -124,6 +124,15 @@ The portal names the nearest client site and the distance. An hour after closing
 
 **Attendance → Clock-ins** shows the daily register (who's in, late, left early, selfies, map links, reasons). **Attendance → Report** gives each staff member's days present and absent, late days and minutes late, average arrival time, early leaves, missed clock-outs, hours worked and punctuality for any date range, with a colour-coded calendar per person and a CSV export. Staff see their own report under **My attendance**. Admins can correct a time or add one manually with a reason, which is flagged and kept in the audit log.
 
+## Timetables
+
+**Timetable** holds each school's weekly classes: day, start and end time, class, subject, teacher and room.
+
+- **Who edits:** teaching staff add and update the periods they teach at their own schools; admins add or change any period at any school and choose the teacher (the teacher is notified). The portal refuses a period that clashes with the same teacher's other classes, or with the same class at that school.
+- **Who sees:** staff see the full timetable of every school they're assigned to, with their own periods highlighted, plus **My week** across all their schools. Admins see every school.
+- **Class record:** open a period to see its topics *taught* (from classes logged, with what was achieved), *this week* and *coming up* (from lesson plans), and any next classes with no plan yet. From there teachers **post the topic and lesson plan** for the next class (the plan is linked to that class and period) and, after the class, **log what was taught**.
+- **Plan before class:** each period shows "Plan posted" or "No plan posted" for its next class. Teachers get an in-app reminder on the day before and the morning of a class with no plan, and it's in their daily email. Admins' daily email lists today's classes with no plan and yesterday's timetabled classes that weren't logged; the lessons compliance report counts timetabled classes with no plan per teacher.
+
 ## Follow-up reminders
 
 Every morning at the time set in Settings (default 08:00), admins and any extra addresses get one email listing:

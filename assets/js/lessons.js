@@ -40,6 +40,7 @@
     const fixedSchool = posted && plan.brief?.target === 'school' && plan.school;
     const preparing = plan?.status === 'assigned';
     const el = App.modal(preparing ? `Prepare: ${esc(plan.topic)}` : plan ? `Fix lesson plan ${esc(plan.ref)}` : 'New lesson plan', `<form id="lp-form" novalidate>
+      ${v.class_name && !plan ? `<div class="note-box" style="margin-bottom:12px"><i class="ti ti-calendar-time"></i> For <b>${esc(v.class_name)}</b> ${esc(v.subject || '')} at ${esc(v.school || '')}, ${esc(fmtDate(v.planned_date))}${v.planned_time ? ' ' + esc(v.planned_time) : ''}.</div>` : ''}
       ${plan?.status === 'returned' && plan.review_note ? `<div class="note-box bad" style="margin-bottom:12px"><b>What to fix:</b> ${esc(plan.review_note)}</div>` : ''}
       <div class="note-box" style="margin-bottom:12px"><i class="ti ti-bulb"></i> Build the project yourself first, then upload screenshots of it here <b>before</b> you go to class. Classes can only be logged against a submitted plan.</div>
       ${posted ? `${briefHtml(plan)}${fixedSchool ? '' : `<div class="field"><label for="lp-school">School <span class="req">*</span></label><select id="lp-school" name="school">${schoolOpts(v.school)}</select></div>`}` : `
@@ -87,7 +88,7 @@
       if (!prep.count() && !plan?.prep_photos?.length) { App.showErrors(form, { prep: 'Upload at least one screenshot of the project you built.' }); return; }
       const files = prep.files().map((f) => ({ field: 'prep[]', file: f })).concat(doc.files().map((f) => ({ field: 'plan[]', file: f })));
       try {
-        const r = await App.busy(e.currentTarget, () => api('lesson_plan_save', { data: { ...App.formData(form), id: plan?.id || 0 }, files }));
+        const r = await App.busy(e.currentTarget, () => api('lesson_plan_save', { data: { ...App.formData(form), id: plan?.id || 0, class_name: v.class_name || '', slot_id: v.slot_id || 0 }, files }));
         App.closeAll();
         toast(preparing ? 'Lesson prepared. You can now log the classes you teach with it.' : plan ? 'Plan resubmitted' : `Plan ${r.ref} submitted. You can now log the classes you teach with it.`);
         App.current?.refresh?.();
@@ -99,7 +100,7 @@
 
   /* ---------------------------------------------------------- log classes */
   /** Log several classes taught from one plan (each with its own photos), or fix one returned class. */
-  async function logClasses(plan, fix = null) {
+  async function logClasses(plan, fix = null, start = null) {
     const school = fix?.school || await currentSchool() || plan.school;
     const rows = [];
     const el = App.modal(fix ? `Fix ${esc(fix.class_name)}` : `Log classes · ${esc(plan.topic)}`, `
@@ -152,7 +153,7 @@
       $('[data-rm]', card)?.addEventListener('click', () => { rows.splice(rows.indexOf(row), 1); card.remove(); });
       rows.push(row);
     };
-    addRow(fix || {});
+    addRow(fix || start || {});
     $('#lc-add', el)?.addEventListener('click', () => addRow());
 
     $('#lc-ok', el).addEventListener('click', async (e) => {
@@ -192,6 +193,10 @@
     $('#lp-new', el).addEventListener('click', () => { App.closeTop(); planForm(); });
   }
   App.logLessonClasses = pickPlanAndLog;
+  /** Log a class taught from a plan, with the class, school and date filled in (from the timetable). */
+  App.logLessonClassFor = async (planId, start) => {
+    try { logClasses((await api('lesson_plan_get', { query: { id: planId } })).plan, null, start); } catch (e) { App.fail(e); }
+  };
 
   /* ------------------------------------------------------- plan details */
   const sessionHtml = (s, admin, own) => `<div class="card card-pad" style="margin-bottom:12px">
@@ -587,11 +592,11 @@
   const bindOpen = (root) => $$('[data-plan]', root).forEach((x) => x.addEventListener('click', () => openPlan(+x.dataset.plan)));
 
   const complianceTable = (r) => `<div class="table-wrap"><table class="tbl"><thead><tr><th>Staff</th><th class="r">Plans</th><th class="r">Classes</th><th class="r hide-sm">Schools</th>
-      <th class="r">Pupils</th><th class="r hide-sm">Finished project</th><th class="r">Prepared first</th><th class="r">Taught, no evidence</th><th class="r hide-sm">No clock-in</th><th class="r" title="Lessons posted to them whose date passed without the project being prepared">Posted, not prepared</th><th class="r">To fix</th></tr></thead>
+      <th class="r">Pupils</th><th class="r hide-sm">Finished project</th><th class="r">Prepared first</th><th class="r">Taught, no evidence</th><th class="r hide-sm">No clock-in</th><th class="r" title="Lessons posted to them whose date passed without the project being prepared">Posted, not prepared</th><th class="r" title="Timetabled classes with no lesson plan posted for them">No plan, timetabled</th><th class="r">To fix</th></tr></thead>
       <tbody>${r.rows.map((x) => `<tr class="click" data-u="${x.id}"><td>${esc(x.name)}</td><td class="r num">${x.plans}</td><td class="r num">${x.classes}${x.cancelled ? `<span class="faint"> +${x.cancelled}✕</span>` : ''}</td>
         <td class="r num hide-sm">${x.schools}</td><td class="r num">${x.pupils}</td><td class="r num hide-sm">${pct(x.completion_pct)}</td>
         <td class="r"><span class="pill ${x.prepared_pct === null ? '' : x.prepared_pct >= 90 ? 'in' : x.prepared_pct >= 60 ? 'out' : 'bad'}">${pct(x.prepared_pct)}</span></td>
-        <td class="r num ${x.gaps ? 'bad' : ''}">${x.gaps}</td><td class="r num hide-sm ${x.no_clockin ? 'out' : ''}">${x.no_clockin}</td><td class="r num ${x.not_prepared ? 'bad' : ''}">${x.not_prepared}</td><td class="r num ${x.returned ? 'bad' : ''}">${x.returned}</td></tr>`).join('')}</tbody></table></div>`;
+        <td class="r num ${x.gaps ? 'bad' : ''}">${x.gaps}</td><td class="r num hide-sm ${x.no_clockin ? 'out' : ''}">${x.no_clockin}</td><td class="r num ${x.not_prepared ? 'bad' : ''}">${x.not_prepared}</td><td class="r num ${x.no_plan ? 'bad' : ''}">${x.no_plan}</td><td class="r num ${x.returned ? 'bad' : ''}">${x.returned}</td></tr>`).join('')}</tbody></table></div>`;
   const gapList = (gaps) => (gaps.length ? `<ul class="list">${gaps.map((g) => `<li class="li"><div class="li-icon tone-bad"><i class="ti ti-alert-circle"></i></div>
       <div class="main-col"><div class="t">${esc(g.user_name)} · ${esc(g.location)}</div><div class="s">${esc(fmtDate(g.work_date, false))} · clocked in ${esc(g.in_at.slice(11, 16))}${g.out_at ? `–${esc(g.out_at.slice(11, 16))}` : ''} for lesson delivery, but logged no class</div></div></li>`).join('')}</ul>`
     : '<p class="faint card-pad">None. Every teaching visit has a class logged.</p>');
@@ -631,7 +636,7 @@
         <p class="muted">${admin ? 'Post lessons to staff, plan what pupils learn each week and what staff should learn, and check the evidence from every class taught.'
           : 'Build the project yourself and submit a lesson plan before class. After each class, log it with photos of the pupils at work and their projects.'}</p></div>
         ${admin ? '<div class="actions"><button class="btn primary" id="ls-post"><i class="ti ti-speakerphone"></i>Post a lesson</button></div>'
-          : '<div class="actions"><button class="btn" id="ls-plan"><i class="ti ti-file-plus"></i>New lesson plan</button><button class="btn primary" id="ls-log"><i class="ti ti-camera-plus"></i>Log classes</button></div>'}</div>
+          : '<div class="actions"><a class="btn ghost" href="#/timetable"><i class="ti ti-calendar-time"></i>Timetable</a><button class="btn" id="ls-plan"><i class="ti ti-file-plus"></i>New lesson plan</button><button class="btn primary" id="ls-log"><i class="ti ti-camera-plus"></i>Log classes</button></div>'}</div>
       <div class="seg scroll" id="ls-tabs" style="margin-bottom:12px">${tabs.map(([k, l, i]) => `<button data-t="${k}"><i class="ti ti-${i}"></i> ${l}</button>`).join('')}</div>
       <div class="filters" id="ls-f">
         <label class="small muted" style="display:flex;gap:6px;align-items:center" data-hide="${noDates}">From <input type="date" name="from" value="${st.from}" style="width:auto"></label>

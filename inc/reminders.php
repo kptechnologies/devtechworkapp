@@ -79,6 +79,12 @@ function run_reminders(bool $force = false): array
         $log = array_merge($log, send_digests($rs));
     }
 
+    // Lesson plans not yet posted for timetabled classes today and tomorrow (in-app, with the digest).
+    if ($rs['enabled'] && setting('_rem_timetable') !== $t && time() >= strtotime("$t {$rs['time']}")) {
+        save_setting('_rem_timetable', $t);
+        $log[] = 'Lesson plan reminders: ' . timetable_plan_reminders() . '.';
+    }
+
     if ($rs['enabled'] && setting('_rem_clockout') !== $t && time() >= strtotime($t . ' ' . work_end()) + 3600) {
         save_setting('_rem_clockout', $t);
         $open = q('SELECT a.user_id, a.in_at FROM attendance a JOIN users u ON u.id = a.user_id AND u.active = 1
@@ -216,6 +222,21 @@ function build_admin_digest(array $rs): array
         $count += count($issues);
     }
 
+    // Timetabled classes today with no lesson plan posted, and yesterday's with no class logged.
+    $line = fn($s) => '<li>' . htmlspecialchars($s['school']) . ' · ' . htmlspecialchars($s['class_name']) . ' ' . htmlspecialchars($s['subject'])
+        . ' at ' . $s['start_time'] . ' · ' . htmlspecialchars($s['teacher_name']) . '</li>';
+    if ($noPlan = timetable_missing_plans(today())) {
+        $html .= digest_section('Classes today with no lesson plan posted', '<ul style="font-size:13px;padding-left:18px;margin:0">'
+            . implode('', array_map($line, $noPlan)) . '</ul>', count($noPlan));
+        $count += count($noPlan);
+        $summary[] = count($noPlan) . ' class' . (count($noPlan) === 1 ? '' : 'es') . ' with no lesson plan';
+    }
+    if (($day = last_work_day()) && ($unlogged = timetable_unlogged($day))) {
+        $html .= digest_section('Timetabled classes not logged on ' . date('D j M', strtotime($day)), '<ul style="font-size:13px;padding-left:18px;margin:0">'
+            . implode('', array_map($line, $unlogged)) . '</ul>', count($unlogged));
+        $count += count($unlogged);
+    }
+
     // Attendance on the last working day.
     if ($day = last_work_day()) {
         $att = attendance_report($day, $day);
@@ -321,6 +342,19 @@ function build_staff_digest(int $uid): array
         $html .= digest_section('Tasks due today', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items)
             . '</ul><p style="font-size:13px">Tick each one off before you clock out, or ask for more time.</p>', count($tasks));
         $count += count($tasks);
+    }
+    $toPost = [];
+    foreach ([today() => 'Today', date('Y-m-d', strtotime('+1 day')) => 'Tomorrow'] as $date => $when) {
+        foreach (timetable_missing_plans($date) as $s) {
+            if ((int)$s['teacher_id'] === $uid) {
+                $toPost[] = "<li>$when {$s['start_time']}: " . htmlspecialchars($s['class_name'] . ' ' . $s['subject'] . ' at ' . $s['school']) . '</li>';
+            }
+        }
+    }
+    if ($toPost) {
+        $html .= digest_section('Lesson plans to post', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $toPost)
+            . '</ul><p style="font-size:13px">Open Timetable in the portal and post the topic and lesson plan before each class.</p>', count($toPost));
+        $count += count($toPost);
     }
     $returned = lessons_returned_count($uid);
     if ($returned) {

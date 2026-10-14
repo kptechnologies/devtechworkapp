@@ -13,6 +13,7 @@ require __DIR__ . '/inc/company.php';
 require __DIR__ . '/inc/api_queries.php';
 require __DIR__ . '/inc/api_lessons.php';
 require __DIR__ . '/inc/api_learning.php';
+require __DIR__ . '/inc/api_timetable.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -48,7 +49,7 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
-    'trainings_list', 'training_get'];
+    'trainings_list', 'training_get', 'timetable_get', 'timetable_class'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {

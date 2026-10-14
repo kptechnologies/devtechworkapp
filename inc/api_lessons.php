@@ -281,6 +281,17 @@ function act_lesson_plan_save(array $in, array $me): void
     $materials = str_in($in['materials'] ?? '', 2000);
     $date = valid_date($in['planned_date'] ?? null) ? $in['planned_date'] : null;
     $time = preg_match('/^\d{2}:\d{2}$/', (string)($in['planned_time'] ?? '')) ? $in['planned_time'] : '';
+    // Posted from a timetable period: remember the class and period (only one the writer teaches, unless an admin).
+    $className = str_in($in['class_name'] ?? ($old['class_name'] ?? ''), 120);
+    $slotId = (int)($in['slot_id'] ?? ($old['slot_id'] ?? 0)) ?: null;
+    if ($slotId) {
+        $slot = q('SELECT teacher_id, class_name FROM timetable_slots WHERE id = ? AND active = 1', [$slotId])->fetch();
+        if (!$slot || (!is_admin($me) && (int)$slot['teacher_id'] !== $me['id'])) {
+            $slotId = null;
+        } elseif ($className === '') {
+            $className = $slot['class_name'];
+        }
+    }
     $e = [];
     if ($school === '') {
         $e['school'] = 'Choose the school.';
@@ -318,13 +329,13 @@ function act_lesson_plan_save(array $in, array $me): void
     if ($old) {
         // Preparing a posted lesson is its real submission time, which the "prepared first" check relies on.
         q("UPDATE lesson_plans SET school = ?, client_id = ?, subject = ?, topic = ?, project_title = ?, objectives = ?, activities = ?, materials = ?,
-            planned_date = ?, planned_time = ?, scheme_item_id = ?, status = 'submitted'" . ($old['status'] === 'assigned' ? ', submitted_at = NOW()' : '') . ', updated_at = NOW() WHERE id = ?',
-            [$school, $clientId, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem, $id]);
+            planned_date = ?, planned_time = ?, scheme_item_id = ?, class_name = ?, slot_id = ?, status = 'submitted'" . ($old['status'] === 'assigned' ? ', submitted_at = NOW()' : '') . ', updated_at = NOW() WHERE id = ?',
+            [$school, $clientId, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem, $className, $slotId, $id]);
         audit('lesson_plan_update', 'lesson_plan', $id, ['topic' => $topic, 'was' => $old['status']]);
     } else {
         q("INSERT INTO lesson_plans (user_id, client_id, school, subject, topic, project_title, objectives, activities, materials, planned_date, planned_time,
-            scheme_item_id, status, submitted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'submitted',NOW(),NOW(),NOW())",
-            [$me['id'], $clientId, $school, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem]);
+            scheme_item_id, class_name, slot_id, status, submitted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',NOW(),NOW(),NOW())",
+            [$me['id'], $clientId, $school, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem, $className, $slotId]);
         $id = (int)db()->lastInsertId();
         audit('lesson_plan_create', 'lesson_plan', $id, ['topic' => $topic]);
     }
@@ -561,6 +572,7 @@ function lesson_compliance(string $from, string $to, ?int $uid = null): array
         COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN students_completed END), 0) AS completed,
         COUNT(DISTINCT CASE WHEN status <> 'cancelled' THEN school END) AS schools
         FROM lesson_sessions WHERE session_date BETWEEN ? AND ? GROUP BY user_id", [$from, $to])->fetchAll(PDO::FETCH_UNIQUE);
+    $noPlan = timetable_no_plan_counts($from, $to); // timetabled classes with no lesson plan posted
     $gaps = [];
     foreach (teaching_visits_without_evidence($from, $to, $uid) as $g) {
         $gaps[(int)$g['user_id']][] = $g;
@@ -582,6 +594,7 @@ function lesson_compliance(string $from, string $to, ?int $uid = null): array
             'no_clockin' => (int)($se['no_clockin'] ?? 0),
             'gaps' => count($gaps[$sid] ?? []),
             'not_prepared' => (int)($unprepared[$sid] ?? 0),
+            'no_plan' => (int)($noPlan[$sid] ?? 0),
         ];
     }
     return ['rows' => $rows, 'gaps' => array_merge(...array_values($gaps ?: [[]]))];

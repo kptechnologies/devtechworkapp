@@ -474,4 +474,12 @@ img.avatar { object-fit: cover; padding: 0; }
 .due-item.wait { border-color: var(--out); background: var(--out-soft); }
 .due-item .due-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .ext-box { border: 1px solid var(--out); background: var(--out-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+/* Class timetable */
+.tt-grid { display: grid; grid-template-columns: repeat(var(--tt-days, 5), minmax(0, 1fr)); gap: 10px; }
+.tt-day { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tt-day-h { font-weight: 600; font-size: 13px; padding: 0 2px; }
+.tt-slot { display: block; width: 100%; text-align: left; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
+.tt-slot:hover { border-color: var(--brand); }
+.tt-slot.mine { border-left: 4px solid var(--brand); background: var(--brand-soft); }
+@media (max-width: 900px) { .tt-grid { grid-template-columns: 1fr; } }
 .task-new { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--border-2); border-radius: 10px; margin-top: 8px; }

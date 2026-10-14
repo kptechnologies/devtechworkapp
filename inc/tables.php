@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -502,6 +502,27 @@ function table_sql(): array
             PRIMARY KEY (task_id, user_id),
             KEY idx_user (user_id)
         ) $t",
+        // v12: each school's weekly class timetable: one row per period
+        "CREATE TABLE IF NOT EXISTS timetable_slots (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            school VARCHAR(190) NOT NULL,
+            client_id INT UNSIGNED NULL,
+            day TINYINT NOT NULL,
+            start_time TIME NOT NULL,
+            end_time TIME NOT NULL,
+            class_name VARCHAR(120) NOT NULL,
+            subject VARCHAR(120) NOT NULL DEFAULT '',
+            teacher_id INT UNSIGNED NULL,
+            room VARCHAR(60) NOT NULL DEFAULT '',
+            note VARCHAR(500) NOT NULL DEFAULT '',
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            created_by INT UNSIGNED NULL,
+            updated_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            KEY idx_school (school, day),
+            KEY idx_teacher (teacher_id, day)
+        ) $t",
         // v10: more time asked for a job or task that is due; the staff member can't end the day until an admin decides
         "CREATE TABLE IF NOT EXISTS job_extensions (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -567,6 +588,9 @@ function column_sql(): array
         ['jobs', 'due_time', 'TIME NULL'],
         // v11: a job closed by its staff because no admin checked it within an hour
         ['jobs', 'self_closed', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        // v12: a lesson plan posted for a class on the timetable
+        ['lesson_plans', 'class_name', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['lesson_plans', 'slot_id', 'INT UNSIGNED NULL'],
     ];
 }
 
