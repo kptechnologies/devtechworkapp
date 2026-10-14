@@ -5,12 +5,14 @@
  * or back to returned when an admin sends it back. Every change is written to the job's timeline.
  * Photos are attachments of timeline entries (owner_type 'jobnote').
  * A job can be split into tasks, each with its own staff and due date/time. Staff can't end their day while a task or
- * job due today is unfinished, unless an admin approves more time (job_extensions).
+ * job due today is unfinished, unless an admin approves more time (job_extensions). When an admin doesn't answer a
+ * request for more time, or check a completed job, within ADMIN_ANSWER_WAIT, the staff member may go ahead themselves.
  */
 
 const JOB_STATUSES = ['requested', 'open', 'in_progress', 'awaiting_check', 'returned', 'done', 'cancelled'];
 const JOB_ACTIVE = ['open', 'in_progress', 'returned'];
 const JOB_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+const ADMIN_ANSWER_WAIT = 3600; // seconds an admin has to answer before staff may go ahead
 
 function job_ref(int $id): string
 {
@@ -128,14 +130,14 @@ function job_row(array $r): array
     unset($r['assignee_list']);
     $r['due_time'] = hhmm($r['due_time'] ?? null);
     $r['overdue'] = !in_array($r['status'], ['done', 'cancelled', 'awaiting_check'], true) && is_overdue($r['due_date'], $r['due_time']);
-    foreach (['tasks_total', 'tasks_done', 'ext_pending'] as $k) {
+    foreach (['tasks_total', 'tasks_done', 'ext_pending', 'self_closed'] as $k) {
         $r[$k] = (int)($r[$k] ?? 0);
     }
     return $r;
 }
 
 const JOB_LIST_SQL = "SELECT j.id, j.title, j.client_type, j.client_name, j.location, j.priority, j.due_date, j.due_time, j.status, j.created_by,
-    j.created_at, j.updated_at, j.completed_at, cu.name AS created_by_name,
+    j.created_at, j.updated_at, j.completed_at, j.self_closed, cu.name AS created_by_name,
     (SELECT GROUP_CONCAT(CONCAT(a.user_id, ':', u.name) ORDER BY u.name SEPARATOR '|') FROM job_assignees a JOIN users u ON u.id = a.user_id
         WHERE a.job_id = j.id AND a.removed_at IS NULL) AS assignee_list,
     (SELECT COUNT(*) FROM job_updates ju JOIN attachments f ON f.owner_type = 'jobnote' AND f.owner_id = ju.id WHERE ju.job_id = j.id) AS photos,
@@ -208,6 +210,9 @@ function act_job_get(array $in, array $me): void
     $j['is_assignee'] = in_array($me['id'], array_map('intval', array_column($j['assignees'], 'id')), true);
     $j['tasks'] = job_tasks($j['id'], $me);
     $j['pending_extension'] = pending_extensions($j['id'])[0] ?? null;
+    $j['self_closed'] = (int)$j['self_closed'];
+    // When the job's staff may close it themselves if no admin has checked it.
+    $j['self_close_at'] = $j['status'] === 'awaiting_check' && $j['completed_at'] ? date('Y-m-d H:i:s', strtotime($j['completed_at']) + ADMIN_ANSWER_WAIT) : null;
     $j['extensions'] = q('SELECT x.id, x.task_id, x.reason, x.new_due_date, x.new_due_time, x.status, x.decision_note, x.created_at, x.decided_at,
         u.name AS user_name, d.name AS decided_by_name, t.title AS task_title FROM job_extensions x JOIN users u ON u.id = x.user_id
         LEFT JOIN users d ON d.id = x.decided_by LEFT JOIN job_tasks t ON t.id = x.task_id WHERE x.job_id = ? ORDER BY x.id DESC', [$j['id']])->fetchAll();
@@ -418,6 +423,16 @@ function act_job_status(array $in, array $me): void
             [$to, $text] = ['done', 'Approved and closed.' . ($note ? ' ' . $note : '')];
             $notifyTo = job_assignee_ids($job['id']);
             break;
+        case 'self_close':
+            // No admin checked the finished job within the hour, so its staff may close it. Admins can still send it back.
+            if (!$assignee || $s !== 'awaiting_check') {
+                fail('You can only close a job of yours that is waiting for a check.');
+            }
+            if (strtotime((string)$job['completed_at']) > time() - ADMIN_ANSWER_WAIT) {
+                fail('An admin has until ' . date('g:ia', strtotime((string)$job['completed_at']) + ADMIN_ANSWER_WAIT) . ' to check it. Try again then.');
+            }
+            [$to, $text] = ['done', "Closed by {$me['name']}: no admin checked it within an hour." . ($note ? ' ' . $note : '')];
+            break;
         case 'return':
             require_admin();
             if (!in_array($s, ['awaiting_check', 'done'], true)) {
@@ -471,7 +486,9 @@ function act_job_status(array $in, array $me): void
         'returned', 'cancelled' => [$note],
         default => [],
     };
-    q("UPDATE jobs SET status = ?$extra, updated_at = NOW() WHERE id = ?", array_merge([$to], $params, [$job['id']]));
+    // Only "self_close" leaves a job marked as closed without an admin's check; any admin action clears it.
+    q("UPDATE jobs SET status = ?$extra, self_closed = ?, updated_at = NOW() WHERE id = ?",
+        array_merge([$to], $params, [$action === 'self_close' ? 1 : 0, $job['id']]));
     $noteId = job_log($job['id'], $action === 'complete' ? 'complete' : 'status', $text);
     if (in_array($to, ['awaiting_check', 'done', 'cancelled'], true)) {
         close_extensions($job['id'], false, 'cancelled', 'The job was ' . ($to === 'awaiting_check' ? 'marked complete' : $to) . '.');
@@ -487,7 +504,11 @@ function act_job_status(array $in, array $me): void
     touch_change();
 
     if ($action === 'complete') {
-        notify_admins('job', "{$me['name']} completed {$job['ref']}: {$job['title']}", 'Check the photos and approve it. ' . $note, 'jobs/' . $job['id']);
+        notify_admins('job', "{$me['name']} completed {$job['ref']}: {$job['title']}", 'Check the photos and approve it within an hour, '
+            . 'or they can close it themselves. ' . $note, 'jobs/' . $job['id']);
+    } elseif ($action === 'self_close') {
+        notify_admins('job', "{$me['name']} closed {$job['ref']} without a check", $job['title'] . "\nNobody checked it within an hour of it being marked complete. "
+            . 'Open it to look at the photos; you can still send it back.', 'jobs/' . $job['id'], true);
     } elseif ($notifyTo) {
         $label = ['approve' => 'approved', 'return' => 'sent back', 'cancel' => 'cancelled', 'reopen' => 'reopened'][$action];
         notify(array_diff($notifyTo, [$me['id']]), 'job', "{$job['ref']} was $label", $job['title'] . ($note ? "\n" . $note : ''), 'jobs/' . $job['id'], $action === 'return');
@@ -652,10 +673,14 @@ function task_assignee_ids(int $taskId): array
 function pending_extensions(int $jobId): array
 {
     $out = [];
-    foreach (q("SELECT x.id, x.task_id, x.reason, x.new_due_date, x.new_due_time, x.created_at, u.name AS user_name
+    foreach (q("SELECT x.id, x.task_id, x.user_id, x.reason, x.new_due_date, x.new_due_time, x.created_at, u.name AS user_name
         FROM job_extensions x JOIN users u ON u.id = x.user_id WHERE x.job_id = ? AND x.status = 'pending' ORDER BY x.id", [$jobId])->fetchAll() as $x) {
         $x['id'] = (int)$x['id'];
+        $x['user_id'] = (int)$x['user_id'];
         $x['new_due_time'] = hhmm($x['new_due_time']);
+        // With no admin answer within the hour, the person who asked may go ahead.
+        $x['proceed_at'] = date('Y-m-d H:i:s', strtotime($x['created_at']) + ADMIN_ANSWER_WAIT);
+        $x['can_proceed'] = time() >= strtotime($x['proceed_at']);
         $out[(int)$x['task_id']] = $x;
     }
     return $out;
@@ -812,17 +837,65 @@ function act_job_task_delete(array $in, array $me): void
     json_out(['ok' => true]);
 }
 
+/** Only the task's staff (or an admin) can tick it, and only while its job is open. */
+function task_tick_guard(array $t, array $me): void
+{
+    if (!is_admin($me) && !in_array($me['id'], task_assignee_ids($t['id']), true)) {
+        fail('"' . $t['title'] . '" isn\'t assigned to you.', 403);
+    }
+    if (!in_array($t['job']['status'], array_merge(JOB_ACTIVE, ['requested']), true)) {
+        fail($t['job']['ref'] . ' is ' . str_replace('_', ' ', $t['job']['status']) . ', so its tasks can\'t be changed.');
+    }
+}
+
+/** Tells the job's staff and admins when the last task is ticked, so the job gets marked complete. */
+function all_tasks_done_notice(array $job): void
+{
+    $title = "All tasks on {$job['ref']} are done";
+    notify(job_assignee_ids($job['id']), 'job', $title, 'Mark the job complete with photos and the client\'s sign-off. ' . $job['title'], 'jobs/' . $job['id'], false);
+    notify_admins('job', $title, $job['title'] . ' · ' . $job['client_name'], 'jobs/' . $job['id'], false);
+}
+
+/** Tick several tasks done at once (the clock-out checklist), across one or more jobs. */
+function act_job_tasks_done(array $in, array $me): void
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', (array)($in['task_ids'] ?? [])))));
+    if (!$ids) {
+        fail('Tick the tasks you finished.');
+    }
+    $note = str_in($in['note'] ?? '', 1000);
+    $tasks = [];
+    foreach ($ids as $id) {
+        $t = load_task($id, $me);
+        task_tick_guard($t, $me);
+        if ($t['status'] === 'open') {
+            $tasks[$t['job']['id']][] = $t;
+        }
+    }
+    db()->beginTransaction();
+    foreach ($tasks as $list) {
+        $job = $list[0]['job'];
+        foreach ($list as $t) {
+            q("UPDATE job_tasks SET status = 'done', done_by = ?, done_at = NOW(), done_note = ? WHERE id = ?", [$me['id'], $note, $t['id']]);
+            close_extensions($job['id'], $t['id'], 'cancelled', 'The task was done.');
+        }
+        log_job_work($job['id'], $job['status'], 'task', (count($list) === 1 ? 'Task done: ' : 'Tasks done: ')
+            . implode(', ', array_column($list, 'title')) . ($note ? "\n" . $note : ''), $me['id']);
+    }
+    $finished = array_filter(array_map(fn($list) => $list[0]['job'], $tasks),
+        fn($job) => !q("SELECT 1 FROM job_tasks WHERE job_id = ? AND status = 'open'", [$job['id']])->fetchColumn());
+    db()->commit();
+    touch_change();
+    array_map('all_tasks_done_notice', $finished);
+    json_out(['ok' => true, 'done' => array_sum(array_map('count', $tasks))]);
+}
+
 /** The task's staff (or an admin) tick a task done, with an optional note, or untick it. */
 function act_job_task_toggle(array $in, array $me): void
 {
     $t = load_task((int)($in['task_id'] ?? 0), $me);
     $job = $t['job'];
-    if (!is_admin($me) && !in_array($me['id'], task_assignee_ids($t['id']), true)) {
-        fail('This task isn\'t assigned to you.', 403);
-    }
-    if (!in_array($job['status'], array_merge(JOB_ACTIVE, ['requested']), true)) {
-        fail('This job is ' . str_replace('_', ' ', $job['status']) . ', so its tasks can\'t be changed.');
-    }
+    task_tick_guard($t, $me);
     $done = !empty($in['done']);
     $note = str_in($in['note'] ?? '', 1000);
     if ($done === ($t['status'] === 'done')) {
@@ -841,9 +914,7 @@ function act_job_task_toggle(array $in, array $me): void
     db()->commit();
     touch_change();
     if ($done && !$open) {
-        $title = "All tasks on {$job['ref']} are done";
-        notify(job_assignee_ids($job['id']), 'job', $title, 'Mark the job complete with photos and the client\'s sign-off. ' . $job['title'], 'jobs/' . $job['id'], false);
-        notify_admins('job', $title, $job['title'] . ' · ' . $job['client_name'], 'jobs/' . $job['id'], false);
+        all_tasks_done_notice($job);
     }
     json_out(['ok' => true, 'open' => $open]);
 }
@@ -929,7 +1000,8 @@ function act_job_extend(array $in, array $me): void
     db()->commit();
     touch_change();
     notify_admins('job', "{$me['name']} needs more time on {$job['ref']}", ($task ? 'Task: ' . $task['title'] . "\n" : '') . $job['title'] . "\nNew time: "
-        . due_label($date, $time) . "\nWhy: $reason\nThey can't clock out for the day until you approve.", 'jobs/' . $job['id'], true);
+        . due_label($date, $time) . "\nWhy: $reason\nThey can't clock out for the day until you answer. If you don't answer within an hour, they can go ahead.",
+        'jobs/' . $job['id'], true);
     json_out(['ok' => true]);
 }
 
@@ -954,13 +1026,7 @@ function act_job_extension_decide(array $in, array $me): void
     q('UPDATE job_extensions SET status = ?, decided_by = ?, decided_at = NOW(), decision_note = ? WHERE id = ?',
         [$approve ? 'approved' : 'rejected', $me['id'], $note, $x['id']]);
     if ($approve) {
-        if ($x['task_id']) {
-            q('UPDATE job_tasks SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $x['task_id']]);
-        }
-        // The job's own deadline moves too when the new time is later, so it isn't left overdue.
-        if (!$x['task_id'] || ($job['due_date'] && $job['due_date'] . $job['due_time'] < $x['new_due_date'] . $x['new_due_time'])) {
-            q('UPDATE jobs SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $job['id']]);
-        }
+        apply_extension_dates($x, $job);
     }
     job_log($job['id'], 'extension', ($approve ? "More time approved on $what, until $until." : "More time refused on $what.") . ($note ? ' ' . $note : ''));
     audit('job_extension_' . ($approve ? 'approve' : 'reject'), 'job', $job['id'], ['extension' => (int)$x['id']]);
@@ -969,5 +1035,47 @@ function act_job_extension_decide(array $in, array $me): void
     notify([(int)$x['user_id']], 'job', ($approve ? 'More time approved' : 'More time refused') . " on {$job['ref']}",
         ($approve ? ucfirst($what) . " is now due $until. You can clock out." : ucfirst($what) . ' must be finished today.' . ($note ? ' ' . $note : '')),
         'jobs/' . $job['id'], true);
+    json_out(['ok' => true]);
+}
+
+/** Moves the task's (or job's) due date to the one asked for in a request for more time. */
+function apply_extension_dates(array $x, array $job): void
+{
+    if ($x['task_id']) {
+        q('UPDATE job_tasks SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $x['task_id']]);
+    }
+    // The job's own deadline moves too when the new time is later, so it isn't left overdue.
+    if (!$x['task_id'] || ($job['due_date'] && $job['due_date'] . $job['due_time'] < $x['new_due_date'] . $x['new_due_time'])) {
+        q('UPDATE jobs SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $job['id']]);
+    }
+}
+
+/** No admin answered a request for more time within the hour: the person who asked moves the due date themselves. */
+function act_job_extension_proceed(array $in, array $me): void
+{
+    $x = q('SELECT * FROM job_extensions WHERE id = ?', [(int)($in['extension_id'] ?? 0)])->fetch();
+    if (!$x || $x['status'] !== 'pending') {
+        fail('This request has already been answered.');
+    }
+    if ((int)$x['user_id'] !== $me['id']) {
+        fail('Only the person who asked can go ahead without an answer.', 403);
+    }
+    if (strtotime($x['created_at']) > time() - ADMIN_ANSWER_WAIT) {
+        fail('An admin has until ' . date('g:ia', strtotime($x['created_at']) + ADMIN_ANSWER_WAIT) . ' to answer. Try again then.');
+    }
+    $job = load_job((int)$x['job_id'], $me);
+    $task = $x['task_id'] ? q('SELECT title FROM job_tasks WHERE id = ?', [$x['task_id']])->fetchColumn() : null;
+    $what = $task ? 'task "' . $task . '"' : 'the job';
+    $until = due_label($x['new_due_date'], $x['new_due_time']);
+    db()->beginTransaction();
+    q("UPDATE job_extensions SET status = 'lapsed', decided_by = ?, decided_at = NOW(), decision_note = ? WHERE id = ?",
+        [$me['id'], 'No admin answer within an hour.', $x['id']]);
+    apply_extension_dates($x, $job);
+    job_log($job['id'], 'extension', "No admin answered within an hour, so {$me['name']} moved $what to $until.");
+    audit('job_extension_lapsed', 'job', $job['id'], ['extension' => (int)$x['id']]);
+    db()->commit();
+    touch_change();
+    notify_admins('job', "{$me['name']} went ahead without your answer on {$job['ref']}", ucfirst($what) . " is now due $until.\nWhy they asked: {$x['reason']}\n"
+        . 'Nobody answered the request within an hour. You can change the due date on the job if needed.', 'jobs/' . $job['id'], true);
     json_out(['ok' => true]);
 }

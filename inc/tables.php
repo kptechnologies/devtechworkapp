@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -565,6 +565,8 @@ function column_sql(): array
         ['lesson_plans', 'scheme_item_id', 'INT UNSIGNED NULL'],
         // v10: job orders have a due time as well as a date
         ['jobs', 'due_time', 'TIME NULL'],
+        // v11: a job closed by its staff because no admin checked it within an hour
+        ['jobs', 'self_closed', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ];
 }
 

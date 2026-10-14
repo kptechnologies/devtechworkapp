@@ -178,6 +178,22 @@ function build_admin_digest(array $rs): array
         $count += count($ext);
         $summary[] = count($ext) . ' asking for more time';
     }
+    // Where staff went ahead because no admin answered within the hour, since the last digest.
+    $since = date('Y-m-d H:i:s', strtotime('-1 day'));
+    $selfClosed = q("SELECT j.id, j.title, u.name FROM jobs j LEFT JOIN users u ON u.id = j.verified_by
+        WHERE j.self_closed = 1 AND j.status = 'done' AND j.verified_at >= ? ORDER BY j.verified_at", [$since])->fetchAll();
+    $lapsed = q("SELECT x.job_id, x.new_due_date, x.new_due_time, u.name, t.title AS task FROM job_extensions x JOIN users u ON u.id = x.user_id
+        LEFT JOIN job_tasks t ON t.id = x.task_id WHERE x.status = 'lapsed' AND x.decided_at >= ? ORDER BY x.decided_at", [$since])->fetchAll();
+    if ($selfClosed || $lapsed) {
+        $items = array_merge(
+            array_map(fn($j) => '<li>' . job_ref((int)$j['id']) . ' · ' . htmlspecialchars($j['title']) . ': closed by ' . htmlspecialchars((string)$j['name'])
+                . ' without your check</li>', $selfClosed),
+            array_map(fn($x) => '<li>' . job_ref((int)$x['job_id']) . ($x['task'] ? ' · ' . htmlspecialchars($x['task']) : '') . ': '
+                . htmlspecialchars($x['name']) . ' moved it to ' . due_label($x['new_due_date'], $x['new_due_time']) . ' without an answer</li>', $lapsed));
+        $html .= digest_section('Not answered within an hour', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items)
+            . '</ul><p style="font-size:13px">You can still send a closed job back, or change a due date.</p>', count($items));
+        $count += count($items);
+    }
     // Tasks left past their due date with no approved extension.
     $late = q("SELECT t.job_id, t.title, t.due_date, t.due_time, (SELECT GROUP_CONCAT(u.name SEPARATOR ', ') FROM job_task_assignees a JOIN users u ON u.id = a.user_id
         WHERE a.task_id = t.id) AS staff FROM job_tasks t JOIN jobs j ON j.id = t.job_id WHERE t.status = 'open' AND t.due_date < ?

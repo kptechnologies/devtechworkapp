@@ -103,8 +103,11 @@ A job can have several staff, and admins can reassign it at any time; the timeli
 **Daily job-order checklist.** Work isn't carried to the next day without an admin's approval:
 
 - At every clock-in, staff see a pop-up of their pending job orders and tasks (due today and overdue first, then what's coming up).
-- The clock-out form shows a checklist of everything due today or overdue. On the clock-out ticked **This is my last location today**, staff can't clock out until each item is done (task ticked, or job marked complete), or an admin has approved more time.
+- The clock-out form shows a checklist of everything due today or overdue, with the time left on each ("2h 10m left", "Expired 40m ago"). Items at the school they're leaving come first; staff tick several and press **Mark selected as done**.
+- **Leaving a school mid-day:** everything due today at that school must be ticked done, or have more time asked for, before they can clock out there.
+- **Ending the day** (clock-out ticked **This is my last location today**): every item must be done (task ticked, or job marked complete), or have more time approved.
 - **Not finished: ask for more time** sends the reason and a new date/time to the admins (in-app and email). The admin approves or refuses from the job page; approving moves the due date. Moving the due date in the job or task edit form also approves it.
+- **One-hour answer window.** If no admin answers a request for more time within an hour, the staff member can press **No answer: go ahead** and the new due date applies. If no admin checks a job marked complete within an hour, its staff can press **Close job myself**; the job shows "Closed without admin check" and admins can still send it back. Admins are emailed either way, and both appear in the daily email.
 - Clocking out of a location mid-day with work still due sends the staff member a "pending job orders" notice; at the end of the day they get a notice of anything carried over with approval.
 - The admin's daily email lists requests waiting for an answer and tasks left past their due date; each staff member's email lists their tasks due today. If no admin can be reached, an admin can still close a staff member's day from the attendance register.
 

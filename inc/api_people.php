@@ -559,6 +559,15 @@ function act_clock(array $in, array $me): void
             clock_fail('jobs_due', "You can't end your day yet: $n job order item" . ($n === 1 ? ' is' : 's are') . ' due and not finished. '
                 . 'Mark each one done, or ask for more time and wait for an admin to approve.', ['items' => $due]);
         }
+        // Leaving a school for the next one: what's due at this school must be ticked done, or have more time asked for.
+        $place = attendance_row($open)['location_label'];
+        $here = array_values(array_filter(jobs_due_for($me['id']),
+            fn($x) => !$x['pending_extension'] && $place !== '' && mb_strtolower(trim($x['client_name'])) === mb_strtolower(trim($place))));
+        if (!$lastStop && $here) {
+            $n = count($here);
+            clock_fail('jobs_due_here', "Before you leave $place, tick off what you finished here or ask for more time: $n item"
+                . ($n === 1 ? ' is' : 's are') . ' due.', ['items' => $here]);
+        }
     }
 
     [$site, $dist] = nearest_site($lat, $lng);
@@ -598,7 +607,7 @@ function act_clock(array $in, array $me): void
 function clock_out_pending_notice(int $uid, bool $lastStop): void
 {
     $carried = fn($x) => (bool)q("SELECT 1 FROM job_extensions WHERE job_id = ? AND " . ($x['kind'] === 'task' ? 'task_id = ?' : 'task_id IS NULL AND ? > 0')
-        . " AND status = 'approved' AND decided_at >= ?", [$x['job_id'], $x['id'], today()])->fetchColumn();
+        . " AND status IN ('approved','lapsed') AND decided_at >= ?", [$x['job_id'], $x['id'], today()])->fetchColumn();
     $items = $lastStop ? array_values(array_filter(jobs_due_for($uid, true), $carried)) : jobs_due_for($uid);
     if (!$items) {
         return;

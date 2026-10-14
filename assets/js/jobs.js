@@ -61,10 +61,32 @@
   const dueLabel = (d, t) => (d ? `${fmtDate(d, false)}${t ? ', ' + timeLabel(t) : ''}` : `today${t ? ', ' + timeLabel(t) : ''}`);
   App.dueLabel = dueLabel;
   const dueText = (j) => (j.due_date ? `<span class="${j.overdue ? 'bad' : ''}">${j.overdue ? '<i class="ti ti-alert-triangle"></i> ' : ''}Due ${esc(dueLabel(j.due_date, j.due_time))}</span>` : '');
+  /** Time left before an item expires: its due date and time (or the end of the work day when it has no time). */
+  App.timeLeft = (date, time) => {
+    const end = App.parseDate(`${date || App.cfg.today} ${(time || App.cfg.work_end || '17:00').slice(0, 5)}:00`);
+    const min = Math.round((end.getTime() - Date.now()) / 60000);
+    const span = (m) => (m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+    return min >= 0 ? { late: false, text: `${span(min)} left` } : { late: true, text: `Expired ${span(-min)} ago` };
+  };
+  /** "2h 10m left" / "Expired 40m ago" pill for an open item. */
+  App.timeLeftPill = (date, time) => { const t = App.timeLeft(date, time); return `<span class="pill ${t.late ? 'bad' : 'info'}" data-left="${esc(date || '')}|${esc(time || '')}"><i class="ti ti-hourglass"></i>${esc(t.text)}</span>`; };
+  /** Keeps every time-left pill inside root current while it's on screen. */
+  App.tickTimeLeft = (root) => {
+    const t = setInterval(() => {
+      if (!root.isConnected) { clearInterval(t); return; }
+      $$('[data-left]', root).forEach((p) => {
+        const [d, h] = p.dataset.left.split('|');
+        const x = App.timeLeft(d, h);
+        p.className = `pill ${x.late ? 'bad' : 'info'}`;
+        p.lastChild.textContent = x.text;
+      });
+    }, 60000);
+  };
   /** Due today, overdue or undated: it's on the staff member's checklist for today. */
   const isDue = (x) => !x.due_date || x.due_date <= App.cfg.today;
   const taskChip = (j) => (j.tasks_total ? ` <span class="pill ${j.tasks_done === j.tasks_total ? 'in' : ''}"><i class="ti ti-checkbox"></i>${j.tasks_done}/${j.tasks_total} tasks</span>` : '')
-    + (j.ext_pending ? ' <span class="pill out"><i class="ti ti-clock-plus"></i>More time asked</span>' : '');
+    + (j.ext_pending ? ' <span class="pill out"><i class="ti ti-clock-plus"></i>More time asked</span>' : '')
+    + (j.self_closed ? ' <span class="pill out" title="Closed by staff: no admin checked it within an hour"><i class="ti ti-user-check"></i>No admin check</span>' : '');
 
   /* ----------------------------------------------------------------- list */
   const TABS_ADMIN = [['active', 'Active'], ['awaiting_check', 'To check'], ['requested', 'Requested'], ['done', 'Done'], ['cancelled', 'Cancelled'], ['', 'All']];
@@ -114,7 +136,7 @@
         <ul class="list mobile-only">${r.items.map((j) => `<li class="li" data-job="${j.id}">
           <div class="li-icon ${j.overdue ? 'tone-bad' : 'tone-brand'}"><i class="ti ti-clipboard-list"></i></div>
           <div class="main-col"><div class="t">${esc(j.title)}</div><div class="s">${esc(j.ref)} · ${esc(j.client_name)}${j.assignees.length && admin ? ' · ' + esc(j.assignees.map((a) => a.name.split(' ')[0]).join(', ')) : ''}</div>
-          ${j.due_date || j.tasks_total || j.ext_pending ? `<div class="s">${dueText(j)}${taskChip(j)}</div>` : ''}</div><div style="text-align:right">${jobPill(j.status)}${prioPill(j.priority) ? '<div style="margin-top:3px">' + prioPill(j.priority) + '</div>' : ''}</div></li>`).join('')}</ul>`;
+          ${j.due_date || j.tasks_total || j.ext_pending || j.self_closed ? `<div class="s">${dueText(j)}${taskChip(j)}</div>` : ''}</div><div style="text-align:right">${jobPill(j.status)}${prioPill(j.priority) ? '<div style="margin-top:3px">' + prioPill(j.priority) + '</div>' : ''}</div></li>`).join('')}</ul>`;
       $$('[data-job]', box).forEach((row) => row.addEventListener('click', () => openJob(+row.dataset.job)));
     };
     $$('#jb-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => {
@@ -144,12 +166,32 @@
       <div class="faint small">Signed ${esc(fmtDateTime(j.signoff_at))}</div></div></div>`;
   }
 
+  /** "12:05pm" from "2026-10-14 12:05:00". */
+  const clock = (dt) => timeLabel(String(dt || '').slice(11, 16));
+  /** What the person who asked for more time can do: wait, or go ahead once an admin hasn't answered within the hour. */
+  App.extWaitHtml = (x) => (x.can_proceed
+    ? `<div class="small" style="margin-top:6px">No admin answered within an hour.</div>
+       <button type="button" class="btn sm primary" data-ext-proceed="${x.id}" style="margin-top:6px"><i class="ti ti-player-play"></i>No answer: go ahead with the new time</button>`
+    : `<div class="faint small" style="margin-top:4px">Waiting for an admin to answer. If nobody answers by ${esc(clock(x.proceed_at))}, you can go ahead yourself.</div>`);
+  /** Go ahead with a request for more time that no admin answered within the hour. */
+  App.proceedExtension = async (btn, extId, done) => {
+    if (!(await App.confirm('Go ahead without an answer?', 'The due date moves to the time you asked for. The admins are told nobody answered.', { ok: 'Go ahead' }))) return;
+    try {
+      await App.busy(btn, () => api('job_extension_proceed', { data: { extension_id: extId } }));
+      toast('Due date moved. The admins have been told.');
+      App.current?.refresh?.();
+      jobsChanged();
+      done && done();
+    } catch (err) { App.fail(err); }
+  };
+
   /** A pending request for more time, with Approve / Refuse for admins. */
   const extBox = (x, admin) => `<div class="ext-box" data-ext="${x.id}"><div class="small"><i class="ti ti-clock-plus"></i> <b>${esc(x.user_name)}</b> asked for more time,
     until <b>${esc(dueLabel(x.new_due_date, x.new_due_time))}</b> <span class="faint">· ${esc(ago(x.created_at))}</span></div>
     <div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(x.reason)}</div>
     ${admin ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
-      <button class="btn sm danger" data-ext-decide="reject"><i class="ti ti-x"></i>Refuse</button></div>` : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
+      <button class="btn sm danger" data-ext-decide="reject"><i class="ti ti-x"></i>Refuse</button></div>`
+      : x.user_id === App.user.id ? App.extWaitHtml(x) : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
 
   /** The job's tasks as a checklist. */
   function tasksHtml(j, admin) {
@@ -166,7 +208,7 @@
         <div class="task-main"><div class="task-t" style="font-weight:500">${esc(x.title)}</div>
           ${x.notes ? `<div class="small muted" style="white-space:pre-wrap">${esc(x.notes)}</div>` : ''}
           <div class="small">${x.status === 'done' ? `<span class="faint">Done${x.done_by_name ? ' by ' + esc(x.done_by_name) : ''} · ${esc(fmtDateTime(x.done_at))}</span>${x.done_note ? `<div class="muted">${esc(x.done_note)}</div>` : ''}`
-            : dueText(x) || '<span class="faint">No due date</span>'}</div>
+            : `${dueText(x) || '<span class="faint">No due date</span>'} ${App.timeLeftPill(x.due_date, x.due_time)}`}</div>
           <div class="chips">${assigneeChips(x.assignees)}</div>
           ${pe ? extBox(pe, admin) : ''}
           ${askMore ? '<button class="btn sm ghost" data-extend style="margin-top:6px"><i class="ti ti-clock-plus"></i>Ask for more time</button>' : ''}</div>
@@ -270,7 +312,12 @@
       const active = ['open', 'in_progress', 'returned'].includes(j.status);
       $('.drawer-head h2', el).textContent = `${j.ref} · ${j.title}`;
       $('.drawer-body', el).innerHTML = `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${jobPill(j.status)}${prioPill(j.priority)}${j.overdue ? '<span class="pill bad"><i class="ti ti-alert-triangle"></i>Overdue</span>' : ''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${jobPill(j.status)}${prioPill(j.priority)}${j.overdue ? '<span class="pill bad"><i class="ti ti-alert-triangle"></i>Overdue</span>' : ''}
+          ${active && j.due_date ? App.timeLeftPill(j.due_date, j.due_time) : ''}${j.self_closed ? '<span class="pill out"><i class="ti ti-user-check"></i>Closed without admin check</span>' : ''}</div>
+        ${j.status === 'awaiting_check' && j.self_close_at ? `<div class="note-box ${admin ? 'warn' : ''}" style="margin-bottom:12px"><i class="ti ti-hourglass"></i>
+          ${admin ? `Check the photos by ${esc(clock(j.self_close_at))}. After that, the staff on this job can close it themselves.`
+            : new Date() >= App.parseDate(j.self_close_at) ? 'No admin checked this within an hour. You can close it yourself.'
+              : `Waiting for an admin to check. If nobody checks it by ${esc(clock(j.self_close_at))}, you can close it yourself.`}</div>` : ''}
         ${j.status === 'returned' && j.review_note ? `<div class="note-box bad" style="margin-bottom:12px"><b>Sent back:</b> ${esc(j.review_note)}</div>` : ''}
         ${j.status === 'requested' ? `<div class="note-box warn" style="margin-bottom:12px">Logged by ${esc(j.created_by_name || 'staff')}. ${admin ? 'Assign someone to accept it.' : 'Waiting for an admin to accept and assign it.'}</div>` : ''}
         ${j.pending_extension ? extBox(j.pending_extension, admin) : ''}
@@ -307,6 +354,8 @@
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
       $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
       $$('[data-ext-decide]', el).forEach((b) => b.addEventListener('click', () => decideExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extDecide, render)));
+      $$('[data-ext-proceed]', el).forEach((b) => b.addEventListener('click', () => App.proceedExtension(b, +b.dataset.extProceed, render)));
+      App.tickTimeLeft($('.drawer-body', el));
       $$('[data-task]', el).forEach((row) => {
         const t = j.tasks.find((x) => x.id === +row.dataset.task);
         $('[data-tick]', row).addEventListener('change', async (e) => {
@@ -345,6 +394,9 @@
       if (mine && active && !openTasks && !j.pending_extension && isDue(j)) btns.push('<button class="btn ghost" data-a="extend"><i class="ti ti-clock-plus"></i>More time</button>');
       if (mine && ['open', 'returned'].includes(j.status)) btns.push('<button class="btn" data-a="start"><i class="ti ti-player-play"></i>Start</button>');
       if (mine && active) btns.push('<button class="btn primary" data-a="complete"><i class="ti ti-camera-check"></i>Mark complete</button>');
+      if (mine && j.status === 'awaiting_check' && j.self_close_at && new Date() >= App.parseDate(j.self_close_at)) {
+        btns.push('<button class="btn primary" data-a="self_close"><i class="ti ti-lock-check"></i>Close job myself</button>');
+      }
       if (!admin && !mine && j.status === 'requested') btns.push('<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>');
       foot.innerHTML = btns.join('');
       foot.classList.toggle('hide', !btns.length);
@@ -372,10 +424,13 @@
       } else if (a === 'approve') {
         note = await App.confirm('Approve and close?', 'Make sure the photos show the work was done.', { ok: 'Approve', input: { label: 'Note (optional)' } });
         if (note === null) return;
+      } else if (a === 'self_close') {
+        note = await App.confirm('Close this job yourself?', 'No admin checked it within an hour. The admins are told, and can still send it back.', { ok: 'Close job', input: { label: 'Note (optional)' } });
+        if (note === null) return;
       }
       try {
         await App.busy(btn, () => api('job_status', { data: { id: j.id, action: a, note: note === true ? '' : note } }));
-        toast({ start: 'Job started', approve: 'Job approved', return: 'Sent back', cancel: 'Job cancelled', reopen: 'Job reopened' }[a]);
+        toast({ start: 'Job started', approve: 'Job approved', return: 'Sent back', cancel: 'Job cancelled', reopen: 'Job reopened', self_close: 'Job closed. The admins have been told.' }[a]);
         App.current?.refresh?.();
         render();
       } catch (err) { App.fail(err); }

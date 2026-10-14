@@ -109,44 +109,71 @@
     drawReason();
     $('#ck-last', el)?.addEventListener('change', drawReason);
 
-    // Job-order checklist: tasks and jobs due today. Ending the day is blocked until each is done or given more time.
+    // Job-order checklist: tasks and jobs due today. Leaving a school needs what's due there ticked done or more time
+    // asked for; ending the day needs everything done or more time approved (or not answered by an admin within the hour).
     let dueItems = info.jobs_due || [];
     const doneKeys = new Set();
-    const blocking = () => dueItems.filter((x) => !doneKeys.has(x.key));
+    const herePlace = info.open?.location_label || '';
+    const atHere = (x) => herePlace !== '' && lower(x.client_name).trim() === lower(herePlace).trim();
+    const blocking = () => {
+      const last = !!$('#ck-last', el)?.checked;
+      return dueItems.filter((x) => !doneKeys.has(x.key) && (last || (atHere(x) && !x.pending_extension)));
+    };
+    const dueRow = (x) => {
+      const done = doneKeys.has(x.key);
+      const pe = x.pending_extension;
+      const pick = x.kind === 'task' && !done && !pe;
+      return `<div class="due-item ${done ? 'ok' : pe ? 'wait' : ''}" data-due="${esc(x.key)}"><div style="display:flex;gap:10px;align-items:flex-start">
+        ${pick ? `<input type="checkbox" data-pick="${x.id}" style="width:18px;height:18px;margin-top:2px;accent-color:var(--brand)" aria-label="Done: ${esc(x.title)}">` : ''}
+        <div style="flex:1;min-width:0"><div><b>${esc(x.ref)}</b> ${esc(x.kind === 'task' ? x.title : x.job_title)}</div>
+          <div class="small muted">${x.kind === 'task' ? `Task on ${esc(x.job_title)} · ` : ''}${esc(x.client_name)} · due ${esc(App.dueLabel(x.due_date, x.due_time))}</div>
+          ${done ? '<div class="small in" style="margin-top:6px"><i class="ti ti-circle-check"></i> Done</div>' : `<div style="margin-top:4px">${App.timeLeftPill(x.due_date, x.due_time)}</div>`}
+          ${done ? '' : pe ? `<div class="small" style="margin-top:6px"><i class="ti ti-clock-plus"></i> More time asked until ${esc(App.dueLabel(pe.new_due_date, pe.new_due_time))}.</div>${pe.user_id === App.user.id ? App.extWaitHtml(pe) : '<div class="faint small">Waiting for an admin to answer.</div>'}`
+            : `<div class="due-acts">${x.kind === 'job' ? '<button type="button" class="btn sm success" data-due-open><i class="ti ti-camera-check"></i>Mark complete</button>' : ''}
+              <button type="button" class="btn sm" data-due-more><i class="ti ti-clock-plus"></i>Not finished: ask for more time</button></div>`}</div></div></div>`;
+    };
     const drawDue = () => {
       const box = $('#ck-due', el);
       if (!box) return;
-      const last = $('#ck-last', el)?.checked;
+      const last = !!$('#ck-last', el)?.checked;
       const left = blocking();
-      box.innerHTML = (dueItems.length ? `<div class="due-list">${dueItems.map((x) => {
-        const done = doneKeys.has(x.key);
-        const pe = x.pending_extension;
-        return `<div class="due-item ${done ? 'ok' : pe ? 'wait' : ''}" data-due="${esc(x.key)}">
-          <div><b>${esc(x.ref)}</b> ${esc(x.kind === 'task' ? x.title : x.job_title)} ${x.overdue ? '<span class="pill bad">Overdue</span>' : ''}</div>
-          <div class="small muted">${x.kind === 'task' ? `Task on ${esc(x.job_title)} · ` : ''}${esc(x.client_name)} · due ${esc(App.dueLabel(x.due_date, x.due_time))}</div>
-          ${done ? '<div class="small in" style="margin-top:6px"><i class="ti ti-circle-check"></i> Done</div>'
-            : pe ? `<div class="small" style="margin-top:6px"><i class="ti ti-clock-plus"></i> More time asked until ${esc(App.dueLabel(pe.new_due_date, pe.new_due_time))}. Waiting for an admin to approve.</div>`
-              : `<div class="due-acts">${x.kind === 'task' ? '<button type="button" class="btn sm success" data-due-done><i class="ti ti-check"></i>Done</button>'
-                : '<button type="button" class="btn sm success" data-due-open><i class="ti ti-camera-check"></i>Mark complete</button>'}
-                <button type="button" class="btn sm" data-due-more><i class="ti ti-clock-plus"></i>Not finished: ask for more time</button></div>`}</div>`;
-      }).join('')}</div>` : '<div class="note-box"><i class="ti ti-circle-check in"></i> Nothing due today.</div>')
-        + (last && left.length ? `<div class="note-box bad" style="margin-top:8px"><i class="ti ti-lock"></i> You can't end your day until ${left.length === 1 ? 'this is' : 'these are'} done or an admin approves more time.
-            <a href="#" data-due-refresh>Check again</a></div>` : '');
+      const here = dueItems.filter(atHere);
+      const other = dueItems.filter((x) => !atHere(x));
+      const group = (title, list, help) => (list.length ? `<div class="small" style="font-weight:600;margin:10px 0 6px">${title}</div>
+        ${help ? `<div class="help" style="margin:-2px 0 6px">${help}</div>` : ''}<div class="due-list">${list.map(dueRow).join('')}</div>` : '');
+      box.innerHTML = (dueItems.length
+        ? group(`At ${esc(herePlace || 'this location')}`, here, 'Tick what you finished here before you leave.')
+          + group(here.length ? 'Other schools' : 'Due today', other, last ? '' : 'Needed before you end your day.')
+          + `<button type="button" class="btn sm success hide" id="ck-pick-done" style="margin-top:10px"><i class="ti ti-checks"></i>Mark selected as done</button>`
+        : '<div class="note-box"><i class="ti ti-circle-check in"></i> Nothing due today.</div>')
+        + (left.length ? `<div class="note-box bad" style="margin-top:8px"><i class="ti ti-lock"></i> ${last
+          ? `You can't end your day until ${left.length === 1 ? 'this is' : 'these are'} done or more time is approved.`
+          : `Before you leave ${esc(herePlace)}, tick off what you finished here or ask for more time.`} <a href="#" data-due-refresh>Check again</a></div>` : '');
+      const pickBtn = $('#ck-pick-done', box);
+      const picked = () => $$('[data-pick]:checked', box).map((i) => +i.dataset.pick);
+      $$('[data-pick]', box).forEach((i) => i.addEventListener('change', () => {
+        const n = picked().length;
+        pickBtn.classList.toggle('hide', !n);
+        pickBtn.innerHTML = `<i class="ti ti-checks"></i>Mark ${n} selected as done`;
+      }));
+      pickBtn?.addEventListener('click', async (e) => {
+        const ids = picked();
+        try {
+          await App.busy(e.currentTarget, () => api('job_tasks_done', { data: { task_ids: ids } }));
+          dueItems.filter((x) => x.kind === 'task' && ids.includes(x.id)).forEach((x) => doneKeys.add(x.key));
+          toast(`${ids.length} task${ids.length === 1 ? '' : 's'} done`);
+          drawDue();
+        } catch (err) { App.fail(err); }
+      });
       $$('[data-due]', box).forEach((row) => {
         const x = dueItems.find((d) => d.key === row.dataset.due);
-        $('[data-due-done]', row)?.addEventListener('click', async (e) => {
-          try {
-            await App.busy(e.currentTarget, () => api('job_task_toggle', { data: { task_id: x.id, done: 1 } }));
-            doneKeys.add(x.key);
-            drawDue();
-          } catch (err) { App.fail(err); }
-        });
         $('[data-due-open]', row)?.addEventListener('click', () => App.openJob(x.job_id));
         $('[data-due-more]', row)?.addEventListener('click', () => App.requestExtension({ job_id: x.job_id, task_id: x.kind === 'task' ? x.id : 0, ref: x.ref, title: x.title }, refreshDue));
+        $('[data-ext-proceed]', row)?.addEventListener('click', (e) => App.proceedExtension(e.currentTarget, +e.currentTarget.dataset.extProceed, refreshDue));
       });
       $('[data-due-refresh]', box)?.addEventListener('click', (e) => { e.preventDefault(); refreshDue(); });
       const ok = $('#ck-ok', el);
-      if (ok) ok.disabled = !!(last && left.length);
+      if (ok) ok.disabled = left.length > 0;
     };
     const refreshDue = async () => {
       try { dueItems = (await api('jobs_due')).due; doneKeys.clear(); } catch { /* keep the last list */ }
@@ -154,6 +181,7 @@
     };
     if (!isIn) {
       drawDue();
+      App.tickTimeLeft($('#ck-due', el));
       $('#ck-last', el).addEventListener('change', drawDue);
       // A job marked complete (or more time asked) from the job drawer on top of this dialog.
       const onJobs = () => { if (el.isConnected) refreshDue(); else document.removeEventListener('jobs:changed', onJobs); };
@@ -258,7 +286,7 @@
         onDone && onDone();
         if (isIn) App.pendingJobsPopup();
       } catch (err) {
-        if (err.code === 'jobs_due') { dueItems = err.data?.items || dueItems; doneKeys.clear(); drawDue(); App.showErrors(form, { checklist: err.message }); return; }
+        if (err.code === 'jobs_due' || err.code === 'jobs_due_here') { if (err.code === 'jobs_due') dueItems = err.data?.items || dueItems; else refreshDue(); doneKeys.clear(); drawDue(); App.showErrors(form, { checklist: err.message }); return; }
         if (err.code === 'stale_gps' && attempt < 2) return send(btn, attempt + 1); // cached fix: try once more
         if (err.code === 'late_reason' || err.code === 'early_reason' || err.code === 'no_gps') App.showErrors(form, { reason: err.message });
         else if (err.code === 'selfie' || err.code === 'old_selfie') App.showErrors(form, { selfie: err.message });
@@ -275,7 +303,7 @@
       if (!isIn && form.work_note.value.trim().length < (info.work_note_min || 10)) errs.work_note = 'Say what you did here in a sentence.';
       if (!photo) errs.selfie = 'Take a selfie now.';
       if ((late || early()) && !form.reason.value.trim()) errs.reason = late ? 'Say why you\'re late.' : 'Say why you\'re leaving early.';
-      if (!isIn && $('#ck-last', el).checked && blocking().length) errs.checklist = 'Finish these job orders, or ask for more time and wait for approval.';
+      if (!isIn && blocking().length) errs.checklist = $('#ck-last', el).checked ? 'Finish these job orders, or ask for more time and wait for approval.' : 'Tick off what you finished here, or ask for more time.';
       if (Object.keys(errs).length) { App.showErrors(form, errs); return; }
       await App.busy(e.currentTarget, () => send(e.currentTarget, 1));
     });
@@ -291,7 +319,7 @@
         <i class="ti ti-${x.kind === 'task' ? 'checkbox' : 'clipboard-list'}"></i></div>
       <div class="main-col"><div class="t">${esc(x.ref)} · ${esc(x.title)}</div>
         <div class="s">${x.kind === 'task' ? esc(x.job_title) + ' · ' : ''}${esc(x.client_name)}</div>
-        <div class="s ${x.overdue ? 'bad' : ''}">${x.overdue ? '<i class="ti ti-alert-triangle"></i> Overdue · ' : ''}Due ${esc(App.dueLabel(x.due_date, x.due_time))}
+        <div class="s ${x.overdue ? 'bad' : ''}">${x.overdue ? '<i class="ti ti-alert-triangle"></i> Overdue · ' : ''}Due ${esc(App.dueLabel(x.due_date, x.due_time))} ${App.timeLeftPill(x.due_date, x.due_time)}
           ${x.pending_extension ? ' <span class="pill out">More time asked</span>' : ''}</div></div></li>`;
     const el = App.modal('Your pending job orders', `
       ${r.due.length ? `<div class="note-box warn" style="margin-bottom:10px"><i class="ti ti-alert-triangle"></i> <b>${r.due.length} due today.</b>
@@ -300,6 +328,7 @@
       ${r.upcoming.length ? `<div class="sec-title">Coming up</div><ul class="list">${r.upcoming.slice(0, 10).map(line).join('')}</ul>` : ''}`,
     '<a class="btn ghost" href="#/jobs" data-close>All my jobs</a><button class="btn primary" data-close>Got it</button>');
     $$('[data-job]', el).forEach((li) => li.addEventListener('click', () => { App.closeTop(); App.openJob(+li.dataset.job); }));
+    App.tickTimeLeft(el);
   };
 
   /** One line per visit today: "School A 8:02am – 10:05am · Maintenance · JO-0012". */
