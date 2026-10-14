@@ -98,6 +98,16 @@ When staff mark a job complete they also capture the **client's sign-off**: the 
 
 A job can have several staff, and admins can reassign it at any time; the timeline keeps the full history of who was on it, every update, photo and status change. Overdue jobs are highlighted, and staff get a notification when they're added to a job.
 
+**Time frames and tasks.** Every job an admin creates needs a due date, and can have a due time. A job can be split into **tasks**, each with its own staff and due date/time (add them when creating the job, or with **Add task** on the job). Staff given a task are added to the job automatically. Staff tick their own tasks off; when all are done they mark the whole job complete with photos and sign-off as usual.
+
+**Daily job-order checklist.** Work isn't carried to the next day without an admin's approval:
+
+- At every clock-in, staff see a pop-up of their pending job orders and tasks (due today and overdue first, then what's coming up).
+- The clock-out form shows a checklist of everything due today or overdue. On the clock-out ticked **This is my last location today**, staff can't clock out until each item is done (task ticked, or job marked complete), or an admin has approved more time.
+- **Not finished: ask for more time** sends the reason and a new date/time to the admins (in-app and email). The admin approves or refuses from the job page; approving moves the due date. Moving the due date in the job or task edit form also approves it.
+- Clocking out of a location mid-day with work still due sends the staff member a "pending job orders" notice; at the end of the day they get a notice of anything carried over with approval.
+- The admin's daily email lists requests waiting for an answer and tasks left past their due date; each staff member's email lists their tasks due today. If no admin can be reached, an admin can still close a staff member's day from the attendance register.
+
 ## Attendance
 
 The portal works as an attendance machine. Staff tap **Clock in** when they arrive and **Clock out** when they leave. Each time:

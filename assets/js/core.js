@@ -122,6 +122,7 @@
       err.fields = body.fields || null;
       err.code = body.code || null;
       err.status = res.status;
+      err.data = body;
       throw err;
     }
     return body;

@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -478,6 +478,47 @@ function table_sql(): array
             UNIQUE KEY uq_item_user (training_id, user_id),
             KEY idx_user (user_id, status)
         ) $t",
+        // v10: tasks inside a job order, each with its own staff and time frame
+        "CREATE TABLE IF NOT EXISTS job_tasks (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            job_id INT UNSIGNED NOT NULL,
+            title VARCHAR(190) NOT NULL,
+            notes TEXT NULL,
+            due_date DATE NULL,
+            due_time TIME NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            sort INT NOT NULL DEFAULT 0,
+            done_by INT UNSIGNED NULL,
+            done_at DATETIME NULL,
+            done_note VARCHAR(1000) NOT NULL DEFAULT '',
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_job (job_id),
+            KEY idx_due (due_date, status)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS job_task_assignees (
+            task_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            PRIMARY KEY (task_id, user_id),
+            KEY idx_user (user_id)
+        ) $t",
+        // v10: more time asked for a job or task that is due; the staff member can't end the day until an admin decides
+        "CREATE TABLE IF NOT EXISTS job_extensions (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            job_id INT UNSIGNED NOT NULL,
+            task_id INT UNSIGNED NULL,
+            user_id INT UNSIGNED NOT NULL,
+            reason VARCHAR(1000) NOT NULL DEFAULT '',
+            new_due_date DATE NOT NULL,
+            new_due_time TIME NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'pending',
+            decided_by INT UNSIGNED NULL,
+            decided_at DATETIME NULL,
+            decision_note VARCHAR(500) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            KEY idx_job (job_id, status),
+            KEY idx_user (user_id, status)
+        ) $t",
     ];
 }
 
@@ -522,6 +563,8 @@ function column_sql(): array
         // v9: lesson plans posted by admin, and plans that follow the scheme of work
         ['lesson_plans', 'assignment_id', 'INT UNSIGNED NULL'],
         ['lesson_plans', 'scheme_item_id', 'INT UNSIGNED NULL'],
+        // v10: job orders have a due time as well as a date
+        ['jobs', 'due_time', 'TIME NULL'],
     ];
 }
 

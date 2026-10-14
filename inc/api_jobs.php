@@ -4,6 +4,8 @@
  * Flow: requested (logged by staff) → open → in_progress → awaiting_check (staff sent photos) → done,
  * or back to returned when an admin sends it back. Every change is written to the job's timeline.
  * Photos are attachments of timeline entries (owner_type 'jobnote').
+ * A job can be split into tasks, each with its own staff and due date/time. Staff can't end their day while a task or
+ * job due today is unfinished, unless an admin approves more time (job_extensions).
  */
 
 const JOB_STATUSES = ['requested', 'open', 'in_progress', 'awaiting_check', 'returned', 'done', 'cancelled'];
@@ -13,6 +15,36 @@ const JOB_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 function job_ref(int $id): string
 {
     return 'JO-' . str_pad((string)$id, 4, '0', STR_PAD_LEFT);
+}
+
+/** 'HH:MM' from a form as a TIME value, or null. */
+function time_in($v): ?string
+{
+    return is_string($v) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v) ? $v . ':00' : null;
+}
+
+/** 'HH:MM' for the app from a TIME column. */
+function hhmm(?string $t): ?string
+{
+    return $t ? substr($t, 0, 5) : null;
+}
+
+/** Past its due date, or due today and past its due time. */
+function is_overdue(?string $date, ?string $time): bool
+{
+    if (!$date) {
+        return false;
+    }
+    return $date < today() || ($date === today() && $time && time() > strtotime("$date $time"));
+}
+
+/** "Tue 14 Oct, 2:00pm" for notifications and the timeline. */
+function due_label(?string $date, ?string $time): string
+{
+    if (!$date) {
+        return 'today';
+    }
+    return date('D j M', strtotime($date)) . ($time ? ', ' . date('g:ia', strtotime("$date $time")) : '');
 }
 
 function job_assignee_ids(int $jobId): array
@@ -94,15 +126,22 @@ function job_row(array $r): array
         $r['assignees'][] = ['id' => (int)$uid, 'name' => $name];
     }
     unset($r['assignee_list']);
-    $r['overdue'] = $r['due_date'] && $r['due_date'] < today() && !in_array($r['status'], ['done', 'cancelled', 'awaiting_check'], true);
+    $r['due_time'] = hhmm($r['due_time'] ?? null);
+    $r['overdue'] = !in_array($r['status'], ['done', 'cancelled', 'awaiting_check'], true) && is_overdue($r['due_date'], $r['due_time']);
+    foreach (['tasks_total', 'tasks_done', 'ext_pending'] as $k) {
+        $r[$k] = (int)($r[$k] ?? 0);
+    }
     return $r;
 }
 
-const JOB_LIST_SQL = "SELECT j.id, j.title, j.client_type, j.client_name, j.location, j.priority, j.due_date, j.status, j.created_by,
+const JOB_LIST_SQL = "SELECT j.id, j.title, j.client_type, j.client_name, j.location, j.priority, j.due_date, j.due_time, j.status, j.created_by,
     j.created_at, j.updated_at, j.completed_at, cu.name AS created_by_name,
     (SELECT GROUP_CONCAT(CONCAT(a.user_id, ':', u.name) ORDER BY u.name SEPARATOR '|') FROM job_assignees a JOIN users u ON u.id = a.user_id
         WHERE a.job_id = j.id AND a.removed_at IS NULL) AS assignee_list,
-    (SELECT COUNT(*) FROM job_updates ju JOIN attachments f ON f.owner_type = 'jobnote' AND f.owner_id = ju.id WHERE ju.job_id = j.id) AS photos
+    (SELECT COUNT(*) FROM job_updates ju JOIN attachments f ON f.owner_type = 'jobnote' AND f.owner_id = ju.id WHERE ju.job_id = j.id) AS photos,
+    (SELECT COUNT(*) FROM job_tasks t WHERE t.job_id = j.id) AS tasks_total,
+    (SELECT COUNT(*) FROM job_tasks t WHERE t.job_id = j.id AND t.status = 'done') AS tasks_done,
+    (SELECT COUNT(*) FROM job_extensions x WHERE x.job_id = j.id AND x.status = 'pending') AS ext_pending
     FROM jobs j LEFT JOIN users cu ON cu.id = j.created_by";
 
 function job_where(array $in, array $me, array &$params): string
@@ -164,8 +203,14 @@ function act_job_get(array $in, array $me): void
     }
     unset($u);
     $j['updates'] = $updates;
-    $j['overdue'] = $j['due_date'] && $j['due_date'] < today() && in_array($j['status'], ['open', 'in_progress', 'returned', 'requested'], true);
+    $j['due_time'] = hhmm($j['due_time']);
+    $j['overdue'] = in_array($j['status'], ['open', 'in_progress', 'returned', 'requested'], true) && is_overdue($j['due_date'], $j['due_time']);
     $j['is_assignee'] = in_array($me['id'], array_map('intval', array_column($j['assignees'], 'id')), true);
+    $j['tasks'] = job_tasks($j['id'], $me);
+    $j['pending_extension'] = pending_extensions($j['id'])[0] ?? null;
+    $j['extensions'] = q('SELECT x.id, x.task_id, x.reason, x.new_due_date, x.new_due_time, x.status, x.decision_note, x.created_at, x.decided_at,
+        u.name AS user_name, d.name AS decided_by_name, t.title AS task_title FROM job_extensions x JOIN users u ON u.id = x.user_id
+        LEFT JOIN users d ON d.id = x.decided_by LEFT JOIN job_tasks t ON t.id = x.task_id WHERE x.job_id = ? ORDER BY x.id DESC', [$j['id']])->fetchAll();
     json_out(['ok' => true, 'job' => $j]);
 }
 
@@ -187,8 +232,13 @@ function act_job_save(array $in, array $me): void
         'description' => str_in($in['description'] ?? '', 5000),
         'priority' => in_array($in['priority'] ?? '', JOB_PRIORITIES, true) ? $in['priority'] : 'normal',
         'due_date' => valid_date($in['due_date'] ?? null) ? $in['due_date'] : null,
+        'due_time' => time_in($in['due_time'] ?? null),
     ];
     $errors = [];
+    if ($admin && !$v['due_date'] && !in_array($job['status'] ?? '', ['done', 'cancelled'], true)) {
+        $errors['due_date'] = 'Set a due date so staff know the time frame.';
+    }
+    $tasks = $admin && !$job ? array_values(array_filter((array)($in['tasks'] ?? []), fn($t) => is_array($t) && trim((string)($t['title'] ?? '')) !== '')) : [];
     if ($v['title'] === '') {
         $errors['title'] = 'Say what needs to be done.';
     }
@@ -208,6 +258,10 @@ function act_job_save(array $in, array $me): void
         $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($v)));
         q("UPDATE jobs SET $set, updated_at = NOW() WHERE id = ?", array_merge(array_values($v), [$id]));
         $noteId = job_log($id, 'edit', 'Job details updated.');
+        // A later due date set by an admin answers any request for more time on the job.
+        if ($admin && $v['due_date'] && ($v['due_date'] . ($v['due_time'] ?? '')) > ($job['due_date'] . ($job['due_time'] ?? ''))) {
+            close_extensions($id, null, 'approved', 'Due date moved to ' . due_label($v['due_date'], $v['due_time']) . '.');
+        }
         audit('job_update', 'job', $id);
     } else {
         $status = $admin ? 'open' : 'requested';
@@ -228,12 +282,24 @@ function act_job_save(array $in, array $me): void
             job_log($id, 'assign', job_assign_text($added, $removed));
         }
     }
+    $taskPeople = [];
+    foreach ($tasks as $t) {
+        [$taskId, $people, $joined] = job_task_store($id, $t, $me);
+        $added = array_values(array_unique(array_merge($added, $joined)));
+        job_log($id, 'task', 'Task added: ' . job_task_line($taskId));
+        foreach ($people as $uid) {
+            $taskPeople[$uid][] = $taskId;
+        }
+    }
     db()->commit();
     touch_change();
 
     $ref = job_ref($id);
     if ($added) {
-        notify($added, 'job', "New job $ref: {$v['title']}", $v['client_name'] . ($v['due_date'] ? ' · due ' . $v['due_date'] : ''), 'jobs/' . $id);
+        notify($added, 'job', "New job $ref: {$v['title']}", $v['client_name'] . ($v['due_date'] ? ' · due ' . due_label($v['due_date'], $v['due_time']) : ''), 'jobs/' . $id);
+    }
+    foreach ($taskPeople as $uid => $taskIds) {
+        notify([$uid], 'job', "Your tasks on $ref: {$v['title']}", implode("\n", array_map('job_task_line', $taskIds)), 'jobs/' . $id, false);
     }
     if (!$job && !$admin) {
         notify_admins('job', $me['name'] . " logged a job: {$v['title']}", $v['client_name'], 'jobs/' . $id);
@@ -340,7 +406,9 @@ function act_job_status(array $in, array $me): void
             }
             $needPhotos = true;
             $signoff = job_signoff_input($in);
-            [$to, $text] = ['awaiting_check', 'Marked complete: ' . $note . "\n" . $signoff['text']];
+            $openTasks = (int)q("SELECT COUNT(*) FROM job_tasks WHERE job_id = ? AND status = 'open'", [$job['id']])->fetchColumn();
+            [$to, $text] = ['awaiting_check', 'Marked complete: ' . $note . "\n" . $signoff['text']
+                . ($openTasks ? "\n$openTasks task" . ($openTasks === 1 ? ' was' : 's were') . ' still open.' : '')];
             break;
         case 'approve':
             require_admin();
@@ -405,6 +473,9 @@ function act_job_status(array $in, array $me): void
     };
     q("UPDATE jobs SET status = ?$extra, updated_at = NOW() WHERE id = ?", array_merge([$to], $params, [$job['id']]));
     $noteId = job_log($job['id'], $action === 'complete' ? 'complete' : 'status', $text);
+    if (in_array($to, ['awaiting_check', 'done', 'cancelled'], true)) {
+        close_extensions($job['id'], false, 'cancelled', 'The job was ' . ($to === 'awaiting_check' ? 'marked complete' : $to) . '.');
+    }
     if ($needPhotos) {
         save_uploads('jobnote', $noteId, $me['id']);
         if ($signoff['signed']) {
@@ -490,6 +561,9 @@ function act_job_delete(array $in, array $me): void
     }
     q('DELETE FROM job_updates WHERE job_id = ?', [$job['id']]);
     q('DELETE FROM job_assignees WHERE job_id = ?', [$job['id']]);
+    q('DELETE a FROM job_task_assignees a JOIN job_tasks t ON t.id = a.task_id WHERE t.job_id = ?', [$job['id']]);
+    q('DELETE FROM job_tasks WHERE job_id = ?', [$job['id']]);
+    q('DELETE FROM job_extensions WHERE job_id = ?', [$job['id']]);
     q('DELETE FROM jobs WHERE id = ?', [$job['id']]);
     audit('job_delete', 'job', $job['id'], ['title' => $job['title']]);
     db()->commit();
@@ -507,12 +581,12 @@ function act_jobs_export(array $in, array $me): void
     header('Content-Disposition: attachment; filename="job-orders-' . today() . '.csv"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['Ref', 'Title', 'Client type', 'Client', 'Location', 'Priority', 'Due', 'Status', 'Assigned to', 'Logged by', 'Created', 'Completed', 'Photos']);
+    fputcsv($out, ['Ref', 'Title', 'Client type', 'Client', 'Location', 'Priority', 'Due', 'Due time', 'Status', 'Assigned to', 'Logged by', 'Created', 'Completed', 'Photos', 'Tasks done']);
     foreach (array_map('job_row', $rows) as $r) {
         fputcsv($out, array_map(fn($x) => csv_safe((string)$x), [
-            $r['ref'], $r['title'], $r['client_type'], $r['client_name'], $r['location'], $r['priority'], $r['due_date'] ?? '',
+            $r['ref'], $r['title'], $r['client_type'], $r['client_name'], $r['location'], $r['priority'], $r['due_date'] ?? '', $r['due_time'] ?? '',
             str_replace('_', ' ', $r['status']), implode(', ', array_column($r['assignees'], 'name')), $r['created_by_name'] ?? '',
-            $r['created_at'], $r['completed_at'] ?? '', $r['photos'],
+            $r['created_at'], $r['completed_at'] ?? '', $r['photos'], $r['tasks_total'] ? "{$r['tasks_done']}/{$r['tasks_total']}" : '',
         ]));
     }
     exit;
@@ -546,12 +620,354 @@ function log_job_work(int $jobId, string $status, string $kind, string $body, in
     }
 }
 
-/** Badge counts for the live pulse. */
+/** Badge counts for the live pulse: admins see jobs to check or accept and requests for more time; staff see new and due jobs. */
 function job_badges(array $me): array
 {
     if (is_admin($me)) {
-        return ['jobs' => (int)q("SELECT COUNT(*) FROM jobs WHERE status IN ('awaiting_check','requested')")->fetchColumn()];
+        return ['jobs' => (int)q("SELECT COUNT(*) FROM jobs WHERE status IN ('awaiting_check','requested')")->fetchColumn()
+            + (int)q("SELECT COUNT(*) FROM job_extensions WHERE status = 'pending'")->fetchColumn()];
     }
-    return ['jobs' => (int)q("SELECT COUNT(*) FROM jobs j JOIN job_assignees a ON a.job_id = j.id AND a.removed_at IS NULL
-        WHERE a.user_id = ? AND j.status IN ('open','returned')", [$me['id']])->fetchColumn()];
+    $ids = q("SELECT j.id FROM jobs j JOIN job_assignees a ON a.job_id = j.id AND a.removed_at IS NULL
+        WHERE a.user_id = ? AND j.status IN ('open','returned')", [$me['id']])->fetchAll(PDO::FETCH_COLUMN);
+    $ids = array_merge(array_map('intval', $ids), array_column(jobs_due_for($me['id']), 'job_id'));
+    return ['jobs' => count(array_unique($ids))];
+}
+
+/* --------------------------------------------------------------- tasks */
+
+/** One task as a line for notifications and the timeline: "Fix projector (Ada, Bola) · due Tue 14 Oct, 2:00pm". */
+function job_task_line(int $taskId): string
+{
+    $t = q('SELECT title, due_date, due_time FROM job_tasks WHERE id = ?', [$taskId])->fetch();
+    $who = user_names(task_assignee_ids($taskId));
+    return $t['title'] . ($who ? " ($who)" : '') . ' · due ' . due_label($t['due_date'], $t['due_time']);
+}
+
+function task_assignee_ids(int $taskId): array
+{
+    return array_map('intval', q('SELECT user_id FROM job_task_assignees WHERE task_id = ?', [$taskId])->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/** Pending requests for more time on a job, keyed by task id (0 for the job itself). */
+function pending_extensions(int $jobId): array
+{
+    $out = [];
+    foreach (q("SELECT x.id, x.task_id, x.reason, x.new_due_date, x.new_due_time, x.created_at, u.name AS user_name
+        FROM job_extensions x JOIN users u ON u.id = x.user_id WHERE x.job_id = ? AND x.status = 'pending' ORDER BY x.id", [$jobId])->fetchAll() as $x) {
+        $x['id'] = (int)$x['id'];
+        $x['new_due_time'] = hhmm($x['new_due_time']);
+        $out[(int)$x['task_id']] = $x;
+    }
+    return $out;
+}
+
+/**
+ * Closes pending requests for more time without an admin decision on the request itself: the due date was moved
+ * (approved), or the work was finished (cancelled). $taskId null = the job's own request, false = every request on the job.
+ */
+function close_extensions(int $jobId, $taskId, string $status, string $note): void
+{
+    $me = current_user();
+    $where = $taskId === false ? '' : ($taskId === null ? ' AND task_id IS NULL' : ' AND task_id = ' . (int)$taskId);
+    $waiting = q("SELECT DISTINCT user_id FROM job_extensions WHERE job_id = ? AND status = 'pending'$where", [$jobId])->fetchAll(PDO::FETCH_COLUMN);
+    if (!$waiting) {
+        return;
+    }
+    q("UPDATE job_extensions SET status = ?, decided_by = ?, decided_at = NOW(), decision_note = ? WHERE job_id = ? AND status = 'pending'$where",
+        [$status, $me['id'] ?? null, mb_substr($note, 0, 500), $jobId]);
+    if ($status === 'approved') {
+        job_log($jobId, 'extension', 'More time approved. ' . $note);
+        notify(array_diff(array_map('intval', $waiting), [$me['id'] ?? 0]), 'job', 'More time approved on ' . job_ref($jobId), $note . ' You can clock out.', 'jobs/' . $jobId, true);
+    }
+}
+
+/** A job's tasks with their staff, overdue flag and any pending request for more time. */
+function job_tasks(int $jobId, array $me): array
+{
+    $rows = q('SELECT t.*, u.name AS done_by_name FROM job_tasks t LEFT JOIN users u ON u.id = t.done_by WHERE t.job_id = ?
+        ORDER BY t.due_date IS NULL, t.due_date, t.due_time IS NULL, t.due_time, t.id', [$jobId])->fetchAll();
+    if (!$rows) {
+        return [];
+    }
+    $people = [];
+    foreach (q('SELECT a.task_id, u.id, u.name FROM job_task_assignees a JOIN users u ON u.id = a.user_id
+        WHERE a.task_id IN (' . implode(',', array_map('intval', array_column($rows, 'id'))) . ') ORDER BY u.name')->fetchAll() as $p) {
+        $people[(int)$p['task_id']][] = ['id' => (int)$p['id'], 'name' => $p['name']];
+    }
+    $pending = pending_extensions($jobId);
+    foreach ($rows as &$t) {
+        $t['id'] = (int)$t['id'];
+        $t['assignees'] = $people[$t['id']] ?? [];
+        $t['due_time'] = hhmm($t['due_time']);
+        $t['overdue'] = $t['status'] === 'open' && is_overdue($t['due_date'], $t['due_time']);
+        $t['mine'] = in_array($me['id'], array_column($t['assignees'], 'id'), true);
+        $t['pending_extension'] = $pending[$t['id']] ?? null;
+    }
+    return $rows;
+}
+
+/**
+ * Creates or updates a task from form input (inside a transaction). Staff given a task who aren't on the job yet are
+ * added to it. Returns [task id, newly given the task, newly added to the job].
+ */
+function job_task_store(int $jobId, array $t, array $me, int $taskId = 0): array
+{
+    $title = str_in($t['title'] ?? '', 190);
+    $due = valid_date($t['due_date'] ?? null) ? $t['due_date'] : null;
+    $time = time_in($t['due_time'] ?? null);
+    $notes = str_in($t['notes'] ?? '', 2000);
+    $who = array_values(array_unique(array_filter(array_map('intval', (array)($t['assignees'] ?? [])))));
+    if ($title === '') {
+        fail('Give each task a title.');
+    }
+    if (!$due) {
+        fail("Set a due date for \"$title\".");
+    }
+    if (!$who) {
+        fail("Choose who does \"$title\".");
+    }
+    $in = implode(',', array_fill(0, count($who), '?'));
+    if ((int)q("SELECT COUNT(*) FROM users WHERE active = 1 AND id IN ($in)", $who)->fetchColumn() !== count($who)) {
+        fail('One of the selected staff can\'t be given this task (inactive or missing).');
+    }
+    if ($taskId) {
+        $old = q('SELECT due_date, due_time FROM job_tasks WHERE id = ?', [$taskId])->fetch();
+        q('UPDATE job_tasks SET title = ?, notes = ?, due_date = ?, due_time = ? WHERE id = ?', [$title, $notes, $due, $time, $taskId]);
+        if ($due . $time > $old['due_date'] . $old['due_time']) {
+            close_extensions($jobId, $taskId, 'approved', 'Due date moved to ' . due_label($due, $time) . '.');
+        }
+    } else {
+        q('INSERT INTO job_tasks (job_id, title, notes, due_date, due_time, created_by, created_at) VALUES (?,?,?,?,?,?,NOW())',
+            [$jobId, $title, $notes, $due, $time, $me['id']]);
+        $taskId = (int)db()->lastInsertId();
+    }
+    $current = task_assignee_ids($taskId);
+    $given = array_values(array_diff($who, $current));
+    foreach ($given as $uid) {
+        q('INSERT INTO job_task_assignees (task_id, user_id) VALUES (?, ?)', [$taskId, $uid]);
+    }
+    if ($gone = array_diff($current, $who)) {
+        q('DELETE FROM job_task_assignees WHERE task_id = ? AND user_id IN (' . implode(',', array_map('intval', $gone)) . ')', [$taskId]);
+    }
+    $onJob = job_assignee_ids($jobId);
+    $joined = array_values(array_diff($who, $onJob));
+    if ($joined) {
+        job_set_assignees($jobId, array_merge($onJob, $joined), $me);
+        job_log($jobId, 'assign', job_assign_text($joined, []));
+    }
+    return [$taskId, $given, $joined];
+}
+
+function load_task(int $taskId, array $me): array
+{
+    $t = q('SELECT * FROM job_tasks WHERE id = ?', [$taskId])->fetch();
+    if (!$t) {
+        fail('Task not found.', 404);
+    }
+    $t['id'] = (int)$t['id'];
+    $t['job'] = load_job((int)$t['job_id'], $me);
+    return $t;
+}
+
+/** Admin adds or edits a task on a job. */
+function act_job_task_save(array $in, array $me): void
+{
+    require_admin();
+    $job = load_job((int)($in['id'] ?? 0), $me);
+    if (in_array($job['status'], ['done', 'cancelled'], true)) {
+        fail('Reopen the job before changing its tasks.');
+    }
+    $taskId = (int)($in['task_id'] ?? 0);
+    $isEdit = $taskId > 0;
+    if ($isEdit && (int)load_task($taskId, $me)['job_id'] !== $job['id']) {
+        fail('Task not found.', 404);
+    }
+    db()->beginTransaction();
+    [$taskId, $given, $joined] = job_task_store($job['id'], $in, $me, $taskId);
+    $line = job_task_line($taskId);
+    job_log($job['id'], 'task', ($isEdit ? 'Task updated: ' : 'Task added: ') . $line);
+    audit('job_task_save', 'job', $job['id'], ['task' => $taskId]);
+    db()->commit();
+    touch_change();
+    if ($joined) {
+        notify($joined, 'job', "New job {$job['ref']}: {$job['title']}", $job['client_name'], 'jobs/' . $job['id']);
+    }
+    if ($given) {
+        notify($given, 'job', "New task on {$job['ref']}: " . str_in($in['title'] ?? '', 190), $line . "\n" . $job['client_name'], 'jobs/' . $job['id'], !$joined);
+    }
+    json_out(['ok' => true, 'task_id' => $taskId]);
+}
+
+function act_job_task_delete(array $in, array $me): void
+{
+    require_admin();
+    $t = load_task((int)($in['task_id'] ?? 0), $me);
+    db()->beginTransaction();
+    q('DELETE FROM job_task_assignees WHERE task_id = ?', [$t['id']]);
+    q('DELETE FROM job_extensions WHERE task_id = ?', [$t['id']]);
+    q('DELETE FROM job_tasks WHERE id = ?', [$t['id']]);
+    job_log($t['job']['id'], 'task', 'Task removed: ' . $t['title']);
+    db()->commit();
+    touch_change();
+    json_out(['ok' => true]);
+}
+
+/** The task's staff (or an admin) tick a task done, with an optional note, or untick it. */
+function act_job_task_toggle(array $in, array $me): void
+{
+    $t = load_task((int)($in['task_id'] ?? 0), $me);
+    $job = $t['job'];
+    if (!is_admin($me) && !in_array($me['id'], task_assignee_ids($t['id']), true)) {
+        fail('This task isn\'t assigned to you.', 403);
+    }
+    if (!in_array($job['status'], array_merge(JOB_ACTIVE, ['requested']), true)) {
+        fail('This job is ' . str_replace('_', ' ', $job['status']) . ', so its tasks can\'t be changed.');
+    }
+    $done = !empty($in['done']);
+    $note = str_in($in['note'] ?? '', 1000);
+    if ($done === ($t['status'] === 'done')) {
+        json_out(['ok' => true]);
+    }
+    db()->beginTransaction();
+    if ($done) {
+        q("UPDATE job_tasks SET status = 'done', done_by = ?, done_at = NOW(), done_note = ? WHERE id = ?", [$me['id'], $note, $t['id']]);
+        close_extensions($job['id'], $t['id'], 'cancelled', 'The task was done.');
+        log_job_work($job['id'], $job['status'], 'task', 'Task done: ' . $t['title'] . ($note ? "\n" . $note : ''), $me['id']);
+    } else {
+        q("UPDATE job_tasks SET status = 'open', done_by = NULL, done_at = NULL, done_note = '' WHERE id = ?", [$t['id']]);
+        job_log($job['id'], 'task', 'Task reopened: ' . $t['title']);
+    }
+    $open = (int)q("SELECT COUNT(*) FROM job_tasks WHERE job_id = ? AND status = 'open'", [$job['id']])->fetchColumn();
+    db()->commit();
+    touch_change();
+    if ($done && !$open) {
+        $title = "All tasks on {$job['ref']} are done";
+        notify(job_assignee_ids($job['id']), 'job', $title, 'Mark the job complete with photos and the client\'s sign-off. ' . $job['title'], 'jobs/' . $job['id'], false);
+        notify_admins('job', $title, $job['title'] . ' · ' . $job['client_name'], 'jobs/' . $job['id'], false);
+    }
+    json_out(['ok' => true, 'open' => $open]);
+}
+
+/* ---------------------------------------------------- daily accountability */
+
+/**
+ * A staff member's job-order checklist: their open tasks due by today (or with no date), and their jobs due by today
+ * that have no open tasks left (those need "Mark complete"). With $upcoming, the ones due after today instead.
+ * Each: {key, kind, id, job_id, ref, title, job_title, client_name, due_date, due_time, overdue, pending_extension}.
+ */
+function jobs_due_for(int $uid, bool $upcoming = false): array
+{
+    $when = $upcoming ? 'x.due_date > ?' : '(x.due_date IS NULL OR x.due_date <= ?)';
+    $tasks = q("SELECT x.id, x.job_id, x.title, x.due_date, x.due_time, j.title AS job_title, j.client_name FROM job_tasks x
+        JOIN job_task_assignees a ON a.task_id = x.id AND a.user_id = ? JOIN jobs j ON j.id = x.job_id
+        WHERE x.status = 'open' AND j.status IN ('open','in_progress','returned') AND $when", [$uid, today()])->fetchAll();
+    $jobs = q("SELECT x.id, x.id AS job_id, x.title, x.due_date, x.due_time, x.title AS job_title, x.client_name FROM jobs x
+        JOIN job_assignees a ON a.job_id = x.id AND a.user_id = ? AND a.removed_at IS NULL
+        WHERE x.status IN ('open','in_progress','returned') AND NOT EXISTS (SELECT 1 FROM job_tasks t WHERE t.job_id = x.id AND t.status = 'open')
+        AND $when", [$uid, today()])->fetchAll();
+    $items = [];
+    $pending = [];
+    foreach ([['task', $tasks], ['job', $jobs]] as [$kind, $rows]) {
+        foreach ($rows as $r) {
+            $jobId = (int)$r['job_id'];
+            $pending[$jobId] = $pending[$jobId] ?? pending_extensions($jobId);
+            $items[] = ['key' => $kind . ':' . $r['id'], 'kind' => $kind, 'id' => (int)$r['id'], 'job_id' => $jobId, 'ref' => job_ref($jobId),
+                'title' => $r['title'], 'job_title' => $r['job_title'], 'client_name' => $r['client_name'], 'due_date' => $r['due_date'],
+                'due_time' => hhmm($r['due_time']), 'overdue' => is_overdue($r['due_date'], $r['due_time']),
+                'pending_extension' => $pending[$jobId][$kind === 'task' ? (int)$r['id'] : 0] ?? null];
+        }
+    }
+    usort($items, fn($a, $b) => [$a['due_date'] ?? '', $a['due_time'] ?? '99', $a['job_id']] <=> [$b['due_date'] ?? '', $b['due_time'] ?? '99', $b['job_id']]);
+    return $items;
+}
+
+/** The signed-in staff member's checklist for today and what's coming up. */
+function act_jobs_due(array $in, array $me): void
+{
+    json_out(['ok' => true, 'due' => jobs_due_for($me['id']), 'upcoming' => array_slice(jobs_due_for($me['id'], true), 0, 30)]);
+}
+
+/** Staff ask for more time on a job or task that is due. An admin must approve before they can end their day. */
+function act_job_extend(array $in, array $me): void
+{
+    $job = load_job((int)($in['id'] ?? 0), $me);
+    $taskId = (int)($in['task_id'] ?? 0);
+    if (!in_array($job['status'], JOB_ACTIVE, true)) {
+        fail('This job isn\'t active.');
+    }
+    $task = null;
+    if ($taskId) {
+        $task = q('SELECT * FROM job_tasks WHERE id = ? AND job_id = ?', [$taskId, $job['id']])->fetch();
+        if (!$task || $task['status'] !== 'open') {
+            fail('This task is already done.');
+        }
+        if (!in_array($me['id'], task_assignee_ids($taskId), true)) {
+            fail('This task isn\'t assigned to you.', 403);
+        }
+    } elseif (!in_array($me['id'], job_assignee_ids($job['id']), true)) {
+        fail('This job isn\'t assigned to you.', 403);
+    }
+    $reason = str_in($in['reason'] ?? '', 1000);
+    $date = valid_date($in['new_due_date'] ?? null) ? $in['new_due_date'] : null;
+    $time = time_in($in['new_due_time'] ?? null);
+    $errors = [];
+    if ($reason === '') {
+        $errors['reason'] = 'Say why it isn\'t finished.';
+    }
+    if (!$date || $date < today() || ($date === today() && (!$time || strtotime("$date $time") <= time()))) {
+        $errors['new_due_date'] = 'Choose a new date (and time) later than now.';
+    }
+    if ($errors) {
+        json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
+    }
+    $what = $task ? 'task "' . $task['title'] . '"' : 'this job';
+    db()->beginTransaction();
+    close_extensions($job['id'], $taskId ?: null, 'cancelled', 'Replaced by a newer request.');
+    q('INSERT INTO job_extensions (job_id, task_id, user_id, reason, new_due_date, new_due_time, created_at) VALUES (?,?,?,?,?,?,NOW())',
+        [$job['id'], $taskId ?: null, $me['id'], $reason, $date, $time]);
+    job_log($job['id'], 'extension', "Asked for more time on $what, until " . due_label($date, $time) . ': ' . $reason);
+    db()->commit();
+    touch_change();
+    notify_admins('job', "{$me['name']} needs more time on {$job['ref']}", ($task ? 'Task: ' . $task['title'] . "\n" : '') . $job['title'] . "\nNew time: "
+        . due_label($date, $time) . "\nWhy: $reason\nThey can't clock out for the day until you approve.", 'jobs/' . $job['id'], true);
+    json_out(['ok' => true]);
+}
+
+/** Admin approves (moves the due date) or refuses a request for more time. */
+function act_job_extension_decide(array $in, array $me): void
+{
+    require_admin();
+    $x = q('SELECT * FROM job_extensions WHERE id = ?', [(int)($in['extension_id'] ?? 0)])->fetch();
+    if (!$x || $x['status'] !== 'pending') {
+        fail('This request has already been answered.');
+    }
+    $job = load_job((int)$x['job_id'], $me);
+    $approve = ($in['decision'] ?? '') === 'approve';
+    $note = str_in($in['note'] ?? '', 500);
+    if (!$approve && $note === '') {
+        fail('Say why more time isn\'t given.');
+    }
+    $task = $x['task_id'] ? q('SELECT title FROM job_tasks WHERE id = ?', [$x['task_id']])->fetchColumn() : null;
+    $what = $task ? 'task "' . $task . '"' : 'the job';
+    $until = due_label($x['new_due_date'], $x['new_due_time']);
+    db()->beginTransaction();
+    q('UPDATE job_extensions SET status = ?, decided_by = ?, decided_at = NOW(), decision_note = ? WHERE id = ?',
+        [$approve ? 'approved' : 'rejected', $me['id'], $note, $x['id']]);
+    if ($approve) {
+        if ($x['task_id']) {
+            q('UPDATE job_tasks SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $x['task_id']]);
+        }
+        // The job's own deadline moves too when the new time is later, so it isn't left overdue.
+        if (!$x['task_id'] || ($job['due_date'] && $job['due_date'] . $job['due_time'] < $x['new_due_date'] . $x['new_due_time'])) {
+            q('UPDATE jobs SET due_date = ?, due_time = ? WHERE id = ?', [$x['new_due_date'], $x['new_due_time'], $job['id']]);
+        }
+    }
+    job_log($job['id'], 'extension', ($approve ? "More time approved on $what, until $until." : "More time refused on $what.") . ($note ? ' ' . $note : ''));
+    audit('job_extension_' . ($approve ? 'approve' : 'reject'), 'job', $job['id'], ['extension' => (int)$x['id']]);
+    db()->commit();
+    touch_change();
+    notify([(int)$x['user_id']], 'job', ($approve ? 'More time approved' : 'More time refused') . " on {$job['ref']}",
+        ($approve ? ucfirst($what) . " is now due $until. You can clock out." : ucfirst($what) . ' must be finished today.' . ($note ? ' ' . $note : '')),
+        'jobs/' . $job['id'], true);
+    json_out(['ok' => true]);
 }

@@ -457,3 +457,21 @@ img.avatar { object-fit: cover; padding: 0; }
 .st-off, .st-future, .st-before_start { opacity: .55; }
 .cal-key { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); }
 @media (max-width: 420px) { .cal-cell { min-height: 44px; padding: 3px; } .cal-t { font-size: 10px; } }
+
+/* Job tasks and the daily job-order checklist */
+.task-bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin: 2px 0 8px; }
+.task-bar span { display: block; height: 100%; background: var(--in); }
+.task-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.task-row:last-child { border-bottom: 0; }
+.task-row > input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brand); flex-shrink: 0; }
+.task-row .task-main { flex: 1; min-width: 0; }
+.task-row.done .task-t { text-decoration: line-through; color: var(--text-3); }
+.task-row .chips { margin-top: 4px; }
+.task-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.due-list { display: flex; flex-direction: column; gap: 8px; }
+.due-item { border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 12px; }
+.due-item.ok { border-color: var(--in); background: var(--in-soft); }
+.due-item.wait { border-color: var(--out); background: var(--out-soft); }
+.due-item .due-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.ext-box { border: 1px solid var(--out); background: var(--out-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.task-new { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--border-2); border-radius: 10px; margin-top: 8px; }

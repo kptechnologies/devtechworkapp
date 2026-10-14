@@ -84,8 +84,11 @@ function run_reminders(bool $force = false): array
         $open = q('SELECT a.user_id, a.in_at FROM attendance a JOIN users u ON u.id = a.user_id AND u.active = 1
             WHERE a.work_date = ? AND a.out_at IS NULL AND a.out_missed = 0', [$t])->fetchAll();
         foreach ($open as $a) {
+            $due = jobs_due_for((int)$a['user_id']);
+            $jobs = $due ? "\n\nBefore you can clock out, finish these or ask for more time:\n"
+                . implode("\n", array_map(fn($x) => "{$x['ref']} {$x['title']}", $due)) : '';
             notify([(int)$a['user_id']], 'attendance', 'Don\'t forget to clock out',
-                'You clocked in at ' . date('g:ia', strtotime($a['in_at'])) . ' and haven\'t clocked out. Clock out with a selfie when you leave.', '', mail_enabled());
+                'You clocked in at ' . date('g:ia', strtotime($a['in_at'])) . ' and haven\'t clocked out. Clock out with a selfie when you leave.' . $jobs, '', mail_enabled());
         }
         $log[] = 'Clock-out reminders: ' . count($open) . '.';
     }
@@ -163,6 +166,27 @@ function build_admin_digest(array $rs): array
                 $summary[] = count($jobs) . ' ' . $short[$key];
             }
         }
+    }
+
+    // Requests for more time: the staff member can't end their day until one is answered.
+    $ext = q("SELECT x.job_id, x.reason, x.new_due_date, x.new_due_time, u.name, t.title AS task FROM job_extensions x JOIN users u ON u.id = x.user_id
+        LEFT JOIN job_tasks t ON t.id = x.task_id WHERE x.status = 'pending' ORDER BY x.created_at")->fetchAll();
+    if ($ext) {
+        $items = array_map(fn($x) => '<li>' . job_ref((int)$x['job_id']) . ($x['task'] ? ' · ' . htmlspecialchars($x['task']) : '') . ' · '
+            . htmlspecialchars($x['name']) . ' wants until ' . due_label($x['new_due_date'], $x['new_due_time']) . ': ' . htmlspecialchars($x['reason']) . '</li>', $ext);
+        $html .= digest_section('Requests for more time', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($ext));
+        $count += count($ext);
+        $summary[] = count($ext) . ' asking for more time';
+    }
+    // Tasks left past their due date with no approved extension.
+    $late = q("SELECT t.job_id, t.title, t.due_date, t.due_time, (SELECT GROUP_CONCAT(u.name SEPARATOR ', ') FROM job_task_assignees a JOIN users u ON u.id = a.user_id
+        WHERE a.task_id = t.id) AS staff FROM job_tasks t JOIN jobs j ON j.id = t.job_id WHERE t.status = 'open' AND t.due_date < ?
+        AND j.status IN ('open','in_progress','returned') ORDER BY t.due_date LIMIT 100", [today()])->fetchAll();
+    if ($late) {
+        $items = array_map(fn($t) => '<li>' . job_ref((int)$t['job_id']) . ' · ' . htmlspecialchars($t['title']) . ' · ' . htmlspecialchars((string)$t['staff'])
+            . ', was due ' . due_label($t['due_date'], $t['due_time']) . '</li>', $late);
+        $html .= digest_section('Tasks carried over without approval', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($late));
+        $count += count($late);
     }
 
     // High-priority report issues not yet marked handled.
@@ -273,6 +297,14 @@ function build_staff_digest(int $uid): array
             $html .= digest_section($title, digest_job_rows($list, false), count($list));
             $count += count($list);
         }
+    }
+    $tasks = array_filter(jobs_due_for($uid), fn($x) => $x['kind'] === 'task');
+    if ($tasks) {
+        $items = array_map(fn($x) => '<li>' . $x['ref'] . ' ' . htmlspecialchars($x['title']) . ' <span style="color:#777">(' . htmlspecialchars($x['job_title'])
+            . ')</span>, due ' . due_label($x['due_date'], $x['due_time']) . ($x['overdue'] ? ' <b style="color:#A32D2D">overdue</b>' : '') . '</li>', $tasks);
+        $html .= digest_section('Tasks due today', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items)
+            . '</ul><p style="font-size:13px">Tick each one off before you clock out, or ask for more time.</p>', count($tasks));
+        $count += count($tasks);
     }
     $returned = lessons_returned_count($uid);
     if ($returned) {

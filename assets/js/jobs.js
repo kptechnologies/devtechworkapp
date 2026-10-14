@@ -10,7 +10,7 @@
   const PRIORITY = { urgent: ['Urgent', 'bad'], high: ['High', 'out'], normal: ['Normal', ''], low: ['Low', ''] };
   const jobPill = (s) => { const [l, t] = JOB_STATUS[s] || [s, '']; return `<span class="pill ${t}">${esc(l)}</span>`; };
   const prioPill = (p) => (p === 'normal' || p === 'low' ? '' : `<span class="pill ${PRIORITY[p]?.[1] || ''}"><i class="ti ti-flag"></i>${esc(PRIORITY[p]?.[0] || p)}</span>`);
-  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag' };
+  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag', task: 'checkbox', extension: 'clock-plus' };
 
   /** Finger/mouse signature pad. Returns { file: () => Promise<File|null>, clear, isEmpty }. */
   function signaturePad(canvas) {
@@ -42,6 +42,8 @@
     };
   }
   App.jobPill = jobPill;
+  /** Tells an open clock-out checklist to reload. */
+  const jobsChanged = () => document.dispatchEvent(new Event('jobs:changed'));
 
   let staffCache = null;
   let clientCache = null;
@@ -53,7 +55,16 @@
   const assigneeChips = (list) => (list.length ? list.map((a) => `<span class="chip-user"><span class="avatar xs">${esc(App.initials(a.name))}</span>${esc(a.name)}</span>`).join('')
     : '<span class="faint small">Not assigned</span>');
 
-  const dueText = (j) => (j.due_date ? `<span class="${j.overdue ? 'bad' : ''}">${j.overdue ? '<i class="ti ti-alert-triangle"></i> ' : ''}Due ${esc(fmtDate(j.due_date, false))}</span>` : '');
+  /** "14:00" → "2:00pm". */
+  const timeLabel = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
+  /** "14 Oct, 2:00pm"; no date means it's due today. */
+  const dueLabel = (d, t) => (d ? `${fmtDate(d, false)}${t ? ', ' + timeLabel(t) : ''}` : `today${t ? ', ' + timeLabel(t) : ''}`);
+  App.dueLabel = dueLabel;
+  const dueText = (j) => (j.due_date ? `<span class="${j.overdue ? 'bad' : ''}">${j.overdue ? '<i class="ti ti-alert-triangle"></i> ' : ''}Due ${esc(dueLabel(j.due_date, j.due_time))}</span>` : '');
+  /** Due today, overdue or undated: it's on the staff member's checklist for today. */
+  const isDue = (x) => !x.due_date || x.due_date <= App.cfg.today;
+  const taskChip = (j) => (j.tasks_total ? ` <span class="pill ${j.tasks_done === j.tasks_total ? 'in' : ''}"><i class="ti ti-checkbox"></i>${j.tasks_done}/${j.tasks_total} tasks</span>` : '')
+    + (j.ext_pending ? ' <span class="pill out"><i class="ti ti-clock-plus"></i>More time asked</span>' : '');
 
   /* ----------------------------------------------------------------- list */
   const TABS_ADMIN = [['active', 'Active'], ['awaiting_check', 'To check'], ['requested', 'Requested'], ['done', 'Done'], ['cancelled', 'Cancelled'], ['', 'All']];
@@ -96,14 +107,14 @@
         return;
       }
       box.innerHTML = `<div class="table-wrap desktop-only"><table class="tbl"><thead><tr><th>Job</th><th>Client</th><th>Assigned to</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
-        ${r.items.map((j) => `<tr class="click" data-job="${j.id}"><td><div style="font-weight:500">${esc(j.title)}</div><div class="faint small">${esc(j.ref)} ${prioPill(j.priority)}</div></td>
+        ${r.items.map((j) => `<tr class="click" data-job="${j.id}"><td><div style="font-weight:500">${esc(j.title)}</div><div class="faint small">${esc(j.ref)} ${prioPill(j.priority)}${taskChip(j)}</div></td>
           <td>${esc(j.client_name)}<div class="faint small">${esc(j.location)}</div></td><td><div class="chips">${assigneeChips(j.assignees)}</div></td>
           <td class="small">${dueText(j) || '<span class="faint">—</span>'}</td><td>${jobPill(j.status)}</td>
           <td class="faint small">${j.photos ? `<i class="ti ti-photo"></i>${j.photos}` : ''}</td></tr>`).join('')}</tbody></table></div>
         <ul class="list mobile-only">${r.items.map((j) => `<li class="li" data-job="${j.id}">
           <div class="li-icon ${j.overdue ? 'tone-bad' : 'tone-brand'}"><i class="ti ti-clipboard-list"></i></div>
           <div class="main-col"><div class="t">${esc(j.title)}</div><div class="s">${esc(j.ref)} · ${esc(j.client_name)}${j.assignees.length && admin ? ' · ' + esc(j.assignees.map((a) => a.name.split(' ')[0]).join(', ')) : ''}</div>
-          ${j.due_date ? `<div class="s">${dueText(j)}</div>` : ''}</div><div style="text-align:right">${jobPill(j.status)}${prioPill(j.priority) ? '<div style="margin-top:3px">' + prioPill(j.priority) + '</div>' : ''}</div></li>`).join('')}</ul>`;
+          ${j.due_date || j.tasks_total || j.ext_pending ? `<div class="s">${dueText(j)}${taskChip(j)}</div>` : ''}</div><div style="text-align:right">${jobPill(j.status)}${prioPill(j.priority) ? '<div style="margin-top:3px">' + prioPill(j.priority) + '</div>' : ''}</div></li>`).join('')}</ul>`;
       $$('[data-job]', box).forEach((row) => row.addEventListener('click', () => openJob(+row.dataset.job)));
     };
     $$('#jb-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => {
@@ -133,6 +144,121 @@
       <div class="faint small">Signed ${esc(fmtDateTime(j.signoff_at))}</div></div></div>`;
   }
 
+  /** A pending request for more time, with Approve / Refuse for admins. */
+  const extBox = (x, admin) => `<div class="ext-box" data-ext="${x.id}"><div class="small"><i class="ti ti-clock-plus"></i> <b>${esc(x.user_name)}</b> asked for more time,
+    until <b>${esc(dueLabel(x.new_due_date, x.new_due_time))}</b> <span class="faint">· ${esc(ago(x.created_at))}</span></div>
+    <div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(x.reason)}</div>
+    ${admin ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
+      <button class="btn sm danger" data-ext-decide="reject"><i class="ti ti-x"></i>Refuse</button></div>` : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
+
+  /** The job's tasks as a checklist. */
+  function tasksHtml(j, admin) {
+    const t = j.tasks || [];
+    const canEdit = admin && !['done', 'cancelled'].includes(j.status);
+    if (!t.length && !canEdit) return '';
+    const canTick = ['open', 'in_progress', 'returned', 'requested'].includes(j.status);
+    const done = t.filter((x) => x.status === 'done').length;
+    const row = (x) => {
+      const pe = x.pending_extension;
+      const askMore = !admin && x.mine && x.status === 'open' && !pe && isDue(x) && ['open', 'in_progress', 'returned'].includes(j.status);
+      return `<div class="task-row ${x.status === 'done' ? 'done' : ''}" data-task="${x.id}">
+        <input type="checkbox" data-tick ${x.status === 'done' ? 'checked' : ''} ${canTick && (x.mine || admin) ? '' : 'disabled'} aria-label="Done: ${esc(x.title)}">
+        <div class="task-main"><div class="task-t" style="font-weight:500">${esc(x.title)}</div>
+          ${x.notes ? `<div class="small muted" style="white-space:pre-wrap">${esc(x.notes)}</div>` : ''}
+          <div class="small">${x.status === 'done' ? `<span class="faint">Done${x.done_by_name ? ' by ' + esc(x.done_by_name) : ''} · ${esc(fmtDateTime(x.done_at))}</span>${x.done_note ? `<div class="muted">${esc(x.done_note)}</div>` : ''}`
+            : dueText(x) || '<span class="faint">No due date</span>'}</div>
+          <div class="chips">${assigneeChips(x.assignees)}</div>
+          ${pe ? extBox(pe, admin) : ''}
+          ${askMore ? '<button class="btn sm ghost" data-extend style="margin-top:6px"><i class="ti ti-clock-plus"></i>Ask for more time</button>' : ''}</div>
+        ${canEdit ? `<div class="task-acts"><button class="icon-btn" data-edit-task title="Edit task"><i class="ti ti-edit"></i></button>
+          <button class="icon-btn" data-del-task title="Delete task"><i class="ti ti-trash"></i></button></div>` : ''}</div>`;
+    };
+    return `<div class="sec-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Tasks ${t.length ? `<span class="faint small">· ${done} of ${t.length} done</span>` : ''}</span>
+        ${canEdit ? '<button class="btn sm ghost" id="jd-task-add"><i class="ti ti-plus"></i>Add task</button>' : ''}</div>
+      ${t.length ? `<div class="task-bar"><span style="width:${Math.round((done / t.length) * 100)}%"></span></div><div id="jd-tasks">${t.map(row).join('')}</div>`
+        : '<p class="faint small">Split the job into tasks, each with its own staff and time frame.</p>'}`;
+  }
+
+  /** Approve or refuse a request for more time. */
+  async function decideExtension(btn, extId, decision, done) {
+    let note = '';
+    if (decision === 'reject') {
+      note = await App.confirm('Refuse more time?', 'They\'ll be told to finish it today, and can\'t clock out for the day until it\'s done.', { ok: 'Refuse', danger: true,
+        input: { label: 'Why?', required: true } });
+      if (!note) return;
+    } else if (!(await App.confirm('Approve more time?', 'The due date moves to the time they asked for, and they can clock out.', { ok: 'Approve' }))) return;
+    try {
+      await App.busy(btn, () => api('job_extension_decide', { data: { extension_id: extId, decision, note } }));
+      toast(decision === 'approve' ? 'More time approved' : 'Request refused');
+      App.current?.refresh?.();
+      done && done();
+    } catch (err) { App.fail(err); }
+  }
+
+  /** Ask an admin for more time on a job or task that is due. item: {job_id, task_id?, ref, title}. */
+  App.requestExtension = (item, done) => {
+    const tomorrow = App.addDays ? App.addDays(App.cfg.today, 1) : '';
+    const el = App.modal(`More time for ${esc(item.ref)}`, `<form id="jx2-form" novalidate>
+      <p class="muted" style="margin-bottom:12px"><b>${esc(item.title)}</b><br>Work isn't carried to another day without an admin's approval.
+        You can't end your day until they answer.</p>
+      <div class="field"><label for="jx2-r">Why isn't it finished? <span class="req">*</span></label>
+        <textarea id="jx2-r" name="reason" rows="3" placeholder="e.g. The school's power was off from 11am; 2 of 4 projectors are mounted"></textarea></div>
+      <div class="form-row"><div class="field"><label for="jx2-d">Finish by <span class="req">*</span></label><input type="date" id="jx2-d" name="new_due_date" min="${esc(App.cfg.today)}" value="${esc(tomorrow)}"></div>
+        <div class="field"><label for="jx2-t">Time</label><input type="time" id="jx2-t" name="new_due_time"></div></div></form>`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="jx2-ok"><i class="ti ti-send"></i>Ask admin</button>');
+    $('#jx2-ok', el).addEventListener('click', async (e) => {
+      const form = $('#jx2-form', el);
+      const d = App.formData(form);
+      const errs = {};
+      if (!d.reason.trim()) errs.reason = 'Say why it isn\'t finished.';
+      if (!d.new_due_date) errs.new_due_date = 'Choose when it will be finished.';
+      if (Object.keys(errs).length) { App.showErrors(form, errs); return; }
+      try {
+        await App.busy(e.currentTarget, () => api('job_extend', { data: { id: item.job_id, task_id: item.task_id || 0, ...d } }));
+        App.closeTop();
+        toast('Sent. An admin has been asked to approve.');
+        jobsChanged();
+        App.current?.refresh?.();
+        done && done();
+      } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+    });
+  };
+
+  /** Admin adds or edits one task. */
+  async function editTask(j, t, done) {
+    const staff = await activeStaff();
+    const v = { title: '', notes: '', due_date: j.due_date && j.due_date >= App.cfg.today ? j.due_date : App.cfg.today, due_time: '', ...(t || {}) };
+    const who = new Set((t?.assignees || j.assignees || []).map((a) => +a.id));
+    const el = App.modal(t ? 'Edit task' : `Add a task to ${esc(j.ref)}`, `<form id="jt-form" novalidate>
+      <div class="field"><label for="jt-t">Task <span class="req">*</span></label><input id="jt-t" name="title" value="${esc(v.title)}" placeholder="e.g. Mount the projector in JSS2" autofocus></div>
+      <div class="field"><label for="jt-n">Notes</label><textarea id="jt-n" name="notes" rows="2" placeholder="Details, materials, who to see">${esc(v.notes || '')}</textarea></div>
+      <div class="form-row"><div class="field"><label for="jt-d">Due date <span class="req">*</span></label><input type="date" id="jt-d" name="due_date" value="${esc(v.due_date || '')}"></div>
+        <div class="field"><label for="jt-h">Due time</label><input type="time" id="jt-h" name="due_time" value="${esc(v.due_time || '')}"></div></div>
+      <div class="field" data-field="assignees"><div class="label">Who does it? <span class="req">*</span></div><div class="opts">${staff.map((s) => `<label class="opt">
+        <input type="checkbox" data-multi="1" name="assignees" value="${s.id}" ${who.has(s.id) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div>
+        <div class="help">Anyone not on the job yet is added to it.</div></div></form>`,
+    `<button class="btn ghost" data-close>Cancel</button>${t ? '' : '<button class="btn" id="jt-more">Save and add another</button>'}<button class="btn primary" id="jt-ok">Save task</button>`, { wide: true });
+    const save = async (btn, again) => {
+      const form = $('#jt-form', el);
+      const d = App.formData(form);
+      const errs = {};
+      if (!d.title.trim()) errs.title = 'Say what needs to be done.';
+      if (!d.due_date) errs.due_date = 'Set a due date.';
+      if (!(d.assignees || []).length) errs.assignees = 'Choose at least one person.';
+      if (Object.keys(errs).length) { App.showErrors(form, errs); return; }
+      try {
+        await App.busy(btn, () => api('job_task_save', { data: { id: j.id, task_id: t?.id || 0, ...d, assignees: d.assignees.map(Number) } }));
+        toast(t ? 'Task saved' : 'Task added');
+        App.current?.refresh?.();
+        if (again) { form.title.value = ''; form.notes.value = ''; form.title.focus(); } else App.closeTop();
+        done && done();
+      } catch (err) { App.fail(err); }
+    };
+    $('#jt-ok', el).addEventListener('click', (e) => save(e.currentTarget, false));
+    $('#jt-more', el)?.addEventListener('click', (e) => save(e.currentTarget, true));
+  }
+
   /* ------------------------------------------------------------- detail */
   async function openJob(id) {
     const el = App.drawer('Job', App.loading());
@@ -147,6 +273,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${jobPill(j.status)}${prioPill(j.priority)}${j.overdue ? '<span class="pill bad"><i class="ti ti-alert-triangle"></i>Overdue</span>' : ''}</div>
         ${j.status === 'returned' && j.review_note ? `<div class="note-box bad" style="margin-bottom:12px"><b>Sent back:</b> ${esc(j.review_note)}</div>` : ''}
         ${j.status === 'requested' ? `<div class="note-box warn" style="margin-bottom:12px">Logged by ${esc(j.created_by_name || 'staff')}. ${admin ? 'Assign someone to accept it.' : 'Waiting for an admin to accept and assign it.'}</div>` : ''}
+        ${j.pending_extension ? extBox(j.pending_extension, admin) : ''}
         <dl class="kv"><dt>${j.client_type === 'company' ? 'Company' : j.client_type === 'school' ? 'School' : 'Client'}</dt><dd>${esc(j.client_name)}</dd>
           ${j.location ? `<dt>Location</dt><dd>${esc(j.location)}</dd>` : ''}
           ${j.contact_name || j.contact_phone ? `<dt>Contact</dt><dd>${esc(j.contact_name)}${j.contact_phone ? ` · <a href="tel:${esc(j.contact_phone)}">${esc(j.contact_phone)}</a>` : ''}</dd>` : ''}
@@ -155,6 +282,7 @@
           ${j.source_report_id ? `<dt>From report</dt><dd><a href="#/reports/${j.source_report_id}">View report</a></dd>` : ''}</dl>
         ${j.description ? `<div class="sec-title">What needs to be done</div><p style="white-space:pre-wrap">${esc(j.description)}</p>` : ''}
         ${signoffHtml(j)}
+        ${tasksHtml(j, admin)}
         <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between">Assigned to
           ${admin && !['done', 'cancelled'].includes(j.status) ? '<button class="btn sm ghost" id="jd-assign"><i class="ti ti-user-plus"></i>Assign / reassign</button>' : ''}</div>
         <div class="chips">${assigneeChips(j.assignees)}</div>
@@ -177,6 +305,27 @@
         try { await App.busy(e.submitter, () => api('job_update', { data: { id: j.id, body }, files: up.files() })); toast('Update posted'); render(); } catch (err) { App.fail(err); }
       });
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
+      $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
+      $$('[data-ext-decide]', el).forEach((b) => b.addEventListener('click', () => decideExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extDecide, render)));
+      $$('[data-task]', el).forEach((row) => {
+        const t = j.tasks.find((x) => x.id === +row.dataset.task);
+        $('[data-tick]', row).addEventListener('change', async (e) => {
+          e.target.disabled = true;
+          try {
+            const r = await api('job_task_toggle', { data: { task_id: t.id, done: e.target.checked ? 1 : 0 } });
+            toast(e.target.checked ? (r.open ? 'Task done' : 'All tasks done. Mark the job complete with photos.') : 'Task reopened');
+            jobsChanged();
+            App.current?.refresh?.();
+            render();
+          } catch (err) { e.target.checked = !e.target.checked; e.target.disabled = false; App.fail(err); }
+        });
+        $('[data-edit-task]', row)?.addEventListener('click', () => editTask(j, t, render));
+        $('[data-del-task]', row)?.addEventListener('click', async (e) => {
+          if (!(await App.confirm('Delete this task?', esc(t.title), { ok: 'Delete', danger: true }))) return;
+          try { await App.busy(e.currentTarget, () => api('job_task_delete', { data: { task_id: t.id } })); toast('Task deleted'); App.current?.refresh?.(); render(); } catch (err) { App.fail(err); }
+        });
+        $('[data-extend]', row)?.addEventListener('click', () => App.requestExtension({ job_id: j.id, task_id: t.id, ref: j.ref, title: t.title }, render));
+      });
 
       let foot = $('.drawer-foot', el);
       if (!foot) { foot = document.createElement('div'); foot.className = 'drawer-foot'; el.appendChild(foot); }
@@ -192,6 +341,8 @@
       if (!admin && (mine || +j.created_by === App.user.id) && j.priority !== 'urgent' && !['done', 'cancelled', 'awaiting_check'].includes(j.status)) {
         btns.push('<button class="btn ghost" data-a="escalate"><i class="ti ti-flag"></i>Raise priority</button>');
       }
+      const openTasks = (j.tasks || []).filter((t) => t.status === 'open').length;
+      if (mine && active && !openTasks && !j.pending_extension && isDue(j)) btns.push('<button class="btn ghost" data-a="extend"><i class="ti ti-clock-plus"></i>More time</button>');
       if (mine && ['open', 'returned'].includes(j.status)) btns.push('<button class="btn" data-a="start"><i class="ti ti-player-play"></i>Start</button>');
       if (mine && active) btns.push('<button class="btn primary" data-a="complete"><i class="ti ti-camera-check"></i>Mark complete</button>');
       if (!admin && !mine && j.status === 'requested') btns.push('<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>');
@@ -202,7 +353,13 @@
     const act = async (btn, a, j) => {
       if (a === 'edit') { editJob(j, null, render); return; }
       if (a === 'accept') { assignJob(j, render); return; }
-      if (a === 'complete') { completeJob(j, render); return; }
+      if (a === 'extend') { App.requestExtension({ job_id: j.id, ref: j.ref, title: j.title }, render); return; }
+      if (a === 'complete') {
+        const open = (j.tasks || []).filter((t) => t.status === 'open').length;
+        if (open && !(await App.confirm(`${open} task${open === 1 ? ' is' : 's are'} still open`, 'Tick off the finished tasks first. Complete the whole job anyway?', { ok: 'Complete anyway' }))) return;
+        completeJob(j, render);
+        return;
+      }
       if (a === 'escalate') { escalateJob(j, render); return; }
       let note = '';
       if (a === 'return') {
@@ -272,6 +429,7 @@
           signoff_unavailable: d.signoff_unavailable ? 1 : '', signoff_skipped: d.signoff_skipped }, files }));
         App.closeTop();
         toast('Sent for checking');
+        jobsChanged();
         App.current?.refresh?.();
         done && done();
       } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
@@ -335,7 +493,7 @@
   async function editJob(j, prefill = null, done = null) {
     const admin = isAdmin();
     const isNew = !j;
-    const v = { title: '', client_type: 'school', client_name: '', location: '', contact_name: '', contact_phone: '', description: '', priority: 'normal', due_date: '', ...(j || {}), ...(prefill || {}) };
+    const v = { title: '', client_type: 'school', client_name: '', location: '', contact_name: '', contact_phone: '', description: '', priority: 'normal', due_date: '', due_time: '', ...(j || {}), ...(prefill || {}) };
     const staff = admin && isNew ? await activeStaff() : [];
     const preset = new Set((v.assignees || []).map(Number));
     const el = App.modal(isNew ? (admin ? 'New job order' : 'Log a job') : `Edit ${esc(j.ref)}`, `
@@ -352,13 +510,39 @@
           <div class="field"><label for="je-cp">Contact phone</label><input type="tel" id="je-cp" name="contact_phone" value="${esc(v.contact_phone)}"></div></div>
         <div class="field"><label for="je-d">Details</label><textarea id="je-d" name="description" rows="4" placeholder="What exactly is needed, quantities, faults reported, access notes…">${esc(v.description)}</textarea></div>
         <div class="form-row"><div class="field"><label for="je-p">Priority</label><select id="je-p" name="priority">${App.opts(Object.entries(PRIORITY).map(([k, [l]]) => [k, l]), v.priority)}</select></div>
-          <div class="field"><label for="je-due">Due date</label><input type="date" id="je-due" name="due_date" value="${esc(v.due_date || '')}"></div></div>
+          <div class="field"><label for="je-due">Due date${admin ? ' <span class="req">*</span>' : ''}</label><input type="date" id="je-due" name="due_date" value="${esc(v.due_date || '')}"></div>
+          <div class="field"><label for="je-dt">Due time</label><input type="time" id="je-dt" name="due_time" value="${esc(v.due_time || '')}"></div></div>
         ${staff.length ? `<div class="field"><div class="label">Assign to</div><div class="opts">${staff.map((s) => `<label class="opt"><input type="checkbox" data-multi="1" name="assignees" value="${s.id}" ${preset.has(s.id) ? 'checked' : ''}>
-          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div><div class="help">You can add more people or reassign later.</div></div>` : ''}
+          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div><div class="help">You can add more people or reassign later.</div></div>
+        <div class="field"><div class="label">Tasks (optional)</div>
+          <div class="help" style="margin:-2px 0 6px">Split the job into tasks, each with its own staff and time frame. Staff tick them off and can't end their day with one due and unfinished.</div>
+          <div id="je-tasks"></div><button type="button" class="btn sm ghost" id="je-task-add" style="margin-top:8px"><i class="ti ti-plus"></i>Add task</button></div>` : ''}
         ${isNew ? '<div class="field"><div class="label">Photos (optional)</div><div id="je-up"></div></div>' : ''}
       </form>`, `<button class="btn ghost" data-close>Cancel</button>${!isNew && admin ? '<button class="btn danger" id="je-del"><i class="ti ti-trash"></i>Delete</button>' : ''}
         <button class="btn primary" id="je-save">${isNew ? (admin ? 'Create job' : 'Send to admin') : 'Save'}</button>`, { wide: true });
     const up = isNew ? App.uploader($('#je-up', el), { label: 'Add photo' }) : null;
+    // Task rows on a new job: title, due date/time and staff for each.
+    let taskN = 0;
+    $('#je-task-add', el)?.addEventListener('click', () => {
+      const n = taskN++;
+      const form = $('#je-form', el);
+      const row = document.createElement('div');
+      row.className = 'task-new';
+      row.dataset.taskRow = n;
+      row.innerHTML = `<div style="display:flex;gap:8px"><input data-k="title" placeholder="Task, e.g. Mount projector in JSS2" style="flex:1" aria-label="Task">
+          <button type="button" class="icon-btn" data-rm title="Remove task"><i class="ti ti-x"></i></button></div>
+        <div class="form-row" style="margin:0"><input type="date" data-k="due_date" value="${esc(form.due_date.value || App.cfg.today)}" aria-label="Due date">
+          <input type="time" data-k="due_time" value="${esc(form.due_time.value || '')}" aria-label="Due time"></div>
+        <div class="opts">${staff.map((s) => `<label class="opt"><input type="checkbox" data-k="who" value="${s.id}" ${$$('input[name="assignees"]:checked', form).some((x) => +x.value === s.id) ? 'checked' : ''}>
+          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div>`;
+      $('[data-rm]', row).addEventListener('click', () => row.remove());
+      $('#je-tasks', el).appendChild(row);
+      $('[data-k="title"]', row).focus();
+    });
+    const readTasks = () => $$('[data-task-row]', el).map((row) => ({
+      title: $('[data-k="title"]', row).value.trim(), due_date: $('[data-k="due_date"]', row).value, due_time: $('[data-k="due_time"]', row).value,
+      assignees: $$('[data-k="who"]:checked', row).map((x) => +x.value),
+    })).filter((t) => t.title);
     if (admin) {
       // Fill in the client's address and contact when an existing client is picked.
       $('#je-c', el).addEventListener('change', async (e) => {
@@ -382,6 +566,12 @@
       if (!isNew) d.id = j.id;
       if (prefill?.source_report_id) d.source_report_id = prefill.source_report_id;
       if (staff.length) d.assignees = (d.assignees || []).map(Number);
+      if (admin && !d.due_date && !['done', 'cancelled'].includes(j?.status)) { App.showErrors(form, { due_date: 'Set a due date so staff know the time frame.' }); return; }
+      if (isNew && admin) {
+        d.tasks = readTasks();
+        const bad = d.tasks.find((t) => !t.due_date || !t.assignees.length);
+        if (bad) { toast(`Give "${bad.title}" a due date and at least one person.`, true); return; }
+      }
       try {
         const r = await App.busy(e.currentTarget, () => api('job_save', { data: d, files: up ? up.files() : [] }));
         if (App.cfg.clients && !App.cfg.clients.includes(d.client_name.trim())) App.cfg.clients.push(d.client_name.trim());

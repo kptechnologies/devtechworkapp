@@ -430,14 +430,14 @@ function act_attendance_today(array $in, array $me): void
     }
     json_out(['ok' => true, 'record' => $visits ? $visits[count($visits) - 1] : null, 'open' => $open ? attendance_row($open) : null,
         'visits' => $visits, 'my_schools' => $me['schools'], 'sites' => $sites, 'site_radius' => SITE_RADIUS,
-        'work_types' => work_types(), 'work_note_min' => WORK_NOTE_MIN, 'lessons' => lessons_today($me['id']),
+        'work_types' => work_types(), 'work_note_min' => WORK_NOTE_MIN, 'lessons' => lessons_today($me['id']), 'jobs_due' => jobs_due_for($me['id']),
         'work_start' => work_start(), 'work_end' => work_end(), 'late_grace' => late_grace(), 'server_time' => time()]);
 }
 
 /** Rejects a clock-in/out with a code the app uses to retry or explain. */
-function clock_fail(string $code, string $message): void
+function clock_fail(string $code, string $message, array $extra = []): void
 {
-    json_out(['ok' => false, 'error' => $message, 'code' => $code], 422);
+    json_out(['ok' => false, 'error' => $message, 'code' => $code] + $extra, 422);
 }
 
 /**
@@ -553,6 +553,12 @@ function act_clock(array $in, array $me): void
         if ($early && $reason === '' && !in_array('no_gps', $flags, true)) {
             clock_fail('early_reason', 'Work ends at ' . work_end() . '. Say why you\'re leaving early.');
         }
+        // The day can't end with job orders or tasks due today left unfinished, unless an admin gave more time.
+        if ($lastStop && ($due = jobs_due_for($me['id']))) {
+            $n = count($due);
+            clock_fail('jobs_due', "You can't end your day yet: $n job order item" . ($n === 1 ? ' is' : 's are') . ' due and not finished. '
+                . 'Mark each one done, or ask for more time and wait for an admin to approve.', ['items' => $due]);
+        }
     }
 
     [$site, $dist] = nearest_site($lat, $lng);
@@ -578,8 +584,31 @@ function act_clock(array $in, array $me): void
     }
     db()->commit();
     touch_change();
+    if ($action === 'out') {
+        clock_out_pending_notice($me['id'], (bool)$lastStop);
+    }
     $r = attendance_row(q('SELECT * FROM attendance WHERE id = ?', [$id])->fetch());
     json_out(['ok' => true, 'record' => $r]);
+}
+
+/**
+ * "Pending assignment" notice after a clock-out: mid-day, the items still due today; at the end of the day, the items
+ * an admin gave more time on today (carried to a later day).
+ */
+function clock_out_pending_notice(int $uid, bool $lastStop): void
+{
+    $carried = fn($x) => (bool)q("SELECT 1 FROM job_extensions WHERE job_id = ? AND " . ($x['kind'] === 'task' ? 'task_id = ?' : 'task_id IS NULL AND ? > 0')
+        . " AND status = 'approved' AND decided_at >= ?", [$x['job_id'], $x['id'], today()])->fetchColumn();
+    $items = $lastStop ? array_values(array_filter(jobs_due_for($uid, true), $carried)) : jobs_due_for($uid);
+    if (!$items) {
+        return;
+    }
+    $n = count($items);
+    $lines = array_map(fn($x) => "{$x['ref']} " . ($x['kind'] === 'task' ? "{$x['title']} ({$x['job_title']})" : $x['title'])
+        . ' · due ' . due_label($x['due_date'], $x['due_time']), $items);
+    $title = $lastStop ? "$n job order item" . ($n === 1 ? '' : 's') . ' carried over with admin approval'
+        : "You have $n pending job order item" . ($n === 1 ? '' : 's') . ' due today';
+    notify([$uid], 'job', $title, implode("\n", $lines), 'jobs', $lastStop);
 }
 
 /* ------------------------------------------------------ attendance report */

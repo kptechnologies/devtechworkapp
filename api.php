@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $public = ['session', 'login'];
 $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
-    'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
+    'jobs_list', 'job_get', 'jobs_export', 'jobs_due', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
