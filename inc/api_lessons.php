@@ -6,6 +6,7 @@
  * Each class taught is a session against a plan, at any school and on any day, with photos of the class at work
  * ('lclass') and of the children's projects ('lwork'), pupil counts and feedback.
  * status: submitted → approved | returned (fix and resubmit → submitted). A session can also be cancelled with a reason.
+ * Plans posted by admin (inc/api_learning.php) start as 'assigned' and become 'submitted' once the staff member prepares them.
  */
 
 const LESSON_OUTCOMES = ['Successful', 'Partly successful', 'Not successful'];
@@ -65,6 +66,8 @@ function lesson_plan_row(array $r): array
     $r['user_id'] = (int)$r['user_id'];
     $r['ref'] = lesson_plan_ref($r['id']);
     $r['classes'] = (int)($r['classes'] ?? 0);
+    $r['assignment_id'] = $r['assignment_id'] ? (int)$r['assignment_id'] : null;
+    $r['scheme_item_id'] = $r['scheme_item_id'] ? (int)$r['scheme_item_id'] : null;
     return $r;
 }
 
@@ -147,10 +150,18 @@ function lesson_session_checks(int $uid, string $school, string $date, string $p
 function lesson_badge(array $me): int
 {
     if (is_admin($me)) {
-        return (int)q("SELECT (SELECT COUNT(*) FROM lesson_plans WHERE status = 'submitted') + (SELECT COUNT(*) FROM lesson_sessions WHERE status = 'submitted')")->fetchColumn();
+        return (int)q("SELECT (SELECT COUNT(*) FROM lesson_plans WHERE status = 'submitted') + (SELECT COUNT(*) FROM lesson_sessions WHERE status = 'submitted')")->fetchColumn()
+            + training_badge($me);
     }
+    return lessons_returned_count((int)$me['id'])
+        + (int)q("SELECT COUNT(*) FROM lesson_plans WHERE user_id = ? AND status = 'assigned'", [$me['id']])->fetchColumn()
+        + training_badge($me);
+}
+
+function lessons_returned_count(int $uid): int
+{
     return (int)q("SELECT (SELECT COUNT(*) FROM lesson_plans WHERE user_id = ? AND status = 'returned') + (SELECT COUNT(*) FROM lesson_sessions WHERE user_id = ? AND status = 'returned')",
-        [$me['id'], $me['id']])->fetchColumn();
+        [$uid, $uid])->fetchColumn();
 }
 
 /** Staff home for lessons: their plans (newest first, with class counts) and their recent classes. Admin: filtered lists. */
@@ -159,7 +170,7 @@ function act_lessons_list(array $in, array $me): void
     $admin = is_admin($me);
     $from = valid_date($in['from'] ?? null) ? $in['from'] : date('Y-m-d', strtotime('-30 days'));
     $to = valid_date($in['to'] ?? null) ? $in['to'] : today();
-    $pw = ['(p.planned_date IS NULL OR p.planned_date BETWEEN ? AND ? OR p.status = \'returned\' OR DATE(p.submitted_at) BETWEEN ? AND ?)'];
+    $pw = ['(p.planned_date IS NULL OR p.planned_date BETWEEN ? AND ? OR p.status IN (\'returned\', \'assigned\') OR DATE(p.submitted_at) BETWEEN ? AND ?)'];
     $pp = [$from, $to, $from, $to];
     $sw = ['s.session_date BETWEEN ? AND ?'];
     $sp = [$from, $to];
@@ -183,7 +194,7 @@ function act_lessons_list(array $in, array $me): void
         $sp[] = $in['subject'];
     }
     $status = (string)($in['status'] ?? '');
-    if (in_array($status, ['submitted', 'approved', 'returned', 'cancelled'], true)) {
+    if (in_array($status, ['assigned', 'submitted', 'approved', 'returned', 'cancelled'], true)) {
         $pw[] = 'p.status = ?';
         $pp[] = $status;
         $sw[] = 's.status = ?';
@@ -194,7 +205,7 @@ function act_lessons_list(array $in, array $me): void
         $sp[] = $in['flag'];
     }
     $plans = array_map('lesson_plan_row', q(LESSON_PLAN_SQL . ' WHERE ' . implode(' AND ', $pw)
-        . " ORDER BY p.status = 'returned' DESC, p.submitted_at DESC LIMIT 300", $pp)->fetchAll());
+        . " ORDER BY p.status = 'returned' DESC, p.status = 'assigned' DESC, p.submitted_at DESC LIMIT 300", $pp)->fetchAll());
     $sessions = lesson_sessions_with_photos(array_map('lesson_session_row', q(LESSON_SESSION_SQL . ' WHERE ' . implode(' AND ', $sw)
         . " ORDER BY s.status = 'returned' DESC, s.session_date DESC, s.id DESC LIMIT 500", $sp)->fetchAll()));
     $prep = attachments_for('lprep', array_column($plans, 'id'));
@@ -220,6 +231,15 @@ function act_lesson_plan_get(array $in, array $me): void
     $p = load_lesson_plan((int)($in['id'] ?? 0), $me);
     $p['prep_photos'] = attachments_for('lprep', [$p['id']])[$p['id']] ?? [];
     $p['plan_files'] = attachments_for('lplan', [$p['id']])[$p['id']] ?? [];
+    $p['brief'] = null;
+    if ($p['assignment_id']) {
+        $b = q('SELECT a.id, a.target, a.school, a.class_level, a.note, a.created_at, u.name AS created_by_name FROM lesson_assignments a
+            JOIN users u ON u.id = a.created_by WHERE a.id = ?', [$p['assignment_id']])->fetch();
+        if ($b) {
+            $b['files'] = attachments_for('lbrief', [$b['id']])[$b['id']] ?? [];
+            $p['brief'] = $b;
+        }
+    }
     $p['sessions'] = lesson_sessions_with_photos(array_map('lesson_session_row',
         q(LESSON_SESSION_SQL . ' WHERE s.plan_id = ? ORDER BY s.session_date, s.id', [$p['id']])->fetchAll()));
     json_out(['ok' => true, 'plan' => $p, 'outcomes' => LESSON_OUTCOMES]);
@@ -237,6 +257,20 @@ function act_lesson_plan_save(array $in, array $me): void
     }
     if ($old && $old['status'] === 'approved') {
         fail('This plan has been approved, so it can\'t be changed.');
+    }
+    // A lesson posted by admin keeps the admin's content; the staff member sets when (and, unless it was posted to a school, where) and adds their proof.
+    $brief = $old && $old['assignment_id'] ? q('SELECT target, school FROM lesson_assignments WHERE id = ?', [$old['assignment_id']])->fetch() : null;
+    if ($brief) {
+        foreach (['subject', 'topic', 'project_title', 'objectives', 'activities', 'materials'] as $k) {
+            $in[$k] = $old[$k];
+        }
+        if ($brief['target'] === 'school' && $brief['school'] !== '') {
+            $in['school'] = $brief['school'];
+        }
+    }
+    $schemeItem = $brief ? ($old['scheme_item_id'] ? (int)$old['scheme_item_id'] : null) : ((int)($in['scheme_item_id'] ?? 0) ?: null);
+    if ($schemeItem && !q('SELECT id FROM lesson_scheme_items WHERE id = ?', [$schemeItem])->fetchColumn()) {
+        $schemeItem = null;
     }
     $school = lesson_school((string)($in['school'] ?? ''));
     $subject = in_array($in['subject'] ?? '', lesson_subjects(), true) ? $in['subject'] : '';
@@ -282,14 +316,15 @@ function act_lesson_plan_save(array $in, array $me): void
     $clientId = lesson_client_id($school);
     db()->beginTransaction();
     if ($old) {
+        // Preparing a posted lesson is its real submission time, which the "prepared first" check relies on.
         q("UPDATE lesson_plans SET school = ?, client_id = ?, subject = ?, topic = ?, project_title = ?, objectives = ?, activities = ?, materials = ?,
-            planned_date = ?, planned_time = ?, status = 'submitted', updated_at = NOW() WHERE id = ?",
-            [$school, $clientId, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $id]);
+            planned_date = ?, planned_time = ?, scheme_item_id = ?, status = 'submitted'" . ($old['status'] === 'assigned' ? ', submitted_at = NOW()' : '') . ', updated_at = NOW() WHERE id = ?',
+            [$school, $clientId, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem, $id]);
         audit('lesson_plan_update', 'lesson_plan', $id, ['topic' => $topic, 'was' => $old['status']]);
     } else {
         q("INSERT INTO lesson_plans (user_id, client_id, school, subject, topic, project_title, objectives, activities, materials, planned_date, planned_time,
-            status, submitted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'submitted',NOW(),NOW(),NOW())",
-            [$me['id'], $clientId, $school, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time]);
+            scheme_item_id, status, submitted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'submitted',NOW(),NOW(),NOW())",
+            [$me['id'], $clientId, $school, $subject, $topic, $project, $objectives, $activities, $materials, $date, $time, $schemeItem]);
         $id = (int)db()->lastInsertId();
         audit('lesson_plan_create', 'lesson_plan', $id, ['topic' => $topic]);
     }
@@ -299,6 +334,8 @@ function act_lesson_plan_save(array $in, array $me): void
     touch_change();
     if ($old && $old['status'] === 'returned') {
         notify_admins('lesson', $me['name'] . ' fixed lesson plan ' . lesson_plan_ref($id), $topic, 'lessons/plan/' . $id, false);
+    } elseif ($old && $old['status'] === 'assigned') {
+        notify_admins('lesson', $me['name'] . ' prepared ' . $topic, 'Their own project is uploaded for ' . lesson_plan_ref($id) . '.', 'lessons/plan/' . $id, false);
     }
     json_out(['ok' => true, 'id' => $id, 'ref' => lesson_plan_ref($id)]);
 }
@@ -314,6 +351,9 @@ function act_lesson_sessions_save(array $in, array $me): void
     $plan = load_lesson_plan((int)($in['plan_id'] ?? 0), $me);
     if ($plan['user_id'] !== $me['id']) {
         fail('Classes are logged by the staff member who prepared the plan.', 403);
+    }
+    if ($plan['status'] === 'assigned') {
+        fail('Prepare this lesson first: build the project yourself and upload screenshots of it.');
     }
     if (!in_array($plan['status'], ['submitted', 'approved'], true)) {
         fail('This lesson plan was returned to you. Fix and resubmit it before logging classes.');
@@ -510,7 +550,10 @@ function lesson_compliance(string $from, string $to, ?int $uid = null): array
     }
     $staff = q("SELECT u.id, u.name FROM users u WHERE $w ORDER BY u.name", $p)->fetchAll();
     $plans = q("SELECT user_id, COUNT(*) AS n, SUM(status = 'approved') AS approved, SUM(status = 'returned') AS returned
-        FROM lesson_plans WHERE DATE(submitted_at) BETWEEN ? AND ? GROUP BY user_id", [$from, $to])->fetchAll(PDO::FETCH_UNIQUE);
+        FROM lesson_plans WHERE status <> 'assigned' AND DATE(submitted_at) BETWEEN ? AND ? GROUP BY user_id", [$from, $to])->fetchAll(PDO::FETCH_UNIQUE);
+    // Posted lessons whose date has passed and that the staff member never prepared.
+    $unprepared = q("SELECT user_id, COUNT(*) FROM lesson_plans WHERE status = 'assigned' AND planned_date BETWEEN ? AND ? AND planned_date < ? GROUP BY user_id",
+        [$from, $to, today()])->fetchAll(PDO::FETCH_KEY_PAIR);
     $sess = q("SELECT user_id, SUM(status <> 'cancelled') AS n, SUM(status = 'cancelled') AS cancelled, SUM(status = 'approved') AS approved,
         SUM(status = 'returned') AS returned, SUM(status <> 'cancelled' AND NOT FIND_IN_SET('prep_late', flags)) AS prepared,
         SUM(status <> 'cancelled' AND FIND_IN_SET('no_clockin', flags)) AS no_clockin,
@@ -538,6 +581,7 @@ function lesson_compliance(string $from, string $to, ?int $uid = null): array
             'completion_pct' => !empty($se['pupils']) ? (int)round((int)$se['completed'] / (int)$se['pupils'] * 100) : null,
             'no_clockin' => (int)($se['no_clockin'] ?? 0),
             'gaps' => count($gaps[$sid] ?? []),
+            'not_prepared' => (int)($unprepared[$sid] ?? 0),
         ];
     }
     return ['rows' => $rows, 'gaps' => array_merge(...array_values($gaps ?: [[]]))];

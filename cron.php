@@ -14,6 +14,7 @@ require __DIR__ . '/inc/api_people.php';
 require __DIR__ . '/inc/api_clients.php';
 require __DIR__ . '/inc/api_payroll.php';
 require __DIR__ . '/inc/api_lessons.php';
+require __DIR__ . '/inc/api_learning.php';
 require __DIR__ . '/inc/reminders.php';
 
 $cli = PHP_SAPI === 'cli';

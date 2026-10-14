@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -409,6 +409,75 @@ function table_sql(): array
             KEY idx_date (session_date),
             KEY idx_status (status)
         ) $t",
+        // v9: lessons posted by admin, the pupils' scheme of work, and staff training
+        "CREATE TABLE IF NOT EXISTS lesson_assignments (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            created_by INT UNSIGNED NOT NULL,
+            target VARCHAR(10) NOT NULL DEFAULT 'staff',
+            school VARCHAR(190) NOT NULL DEFAULT '',
+            subject VARCHAR(120) NOT NULL DEFAULT '',
+            topic VARCHAR(190) NOT NULL,
+            project_title VARCHAR(190) NOT NULL DEFAULT '',
+            objectives TEXT NULL,
+            activities TEXT NULL,
+            materials TEXT NULL,
+            class_level VARCHAR(60) NOT NULL DEFAULT '',
+            planned_date DATE NULL,
+            planned_time CHAR(5) NOT NULL DEFAULT '',
+            note VARCHAR(2000) NOT NULL DEFAULT '',
+            scheme_item_id INT UNSIGNED NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            created_at DATETIME NOT NULL,
+            KEY idx_status (status, created_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS lesson_schemes (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            school VARCHAR(190) NOT NULL,
+            client_id INT UNSIGNED NULL,
+            subject VARCHAR(120) NOT NULL DEFAULT '',
+            class_level VARCHAR(60) NOT NULL DEFAULT '',
+            term VARCHAR(120) NOT NULL DEFAULT '',
+            start_date DATE NOT NULL,
+            created_by INT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            KEY idx_school (school)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS lesson_scheme_items (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            scheme_id INT UNSIGNED NOT NULL,
+            week_no INT NOT NULL DEFAULT 1,
+            topic VARCHAR(190) NOT NULL,
+            project_title VARCHAR(190) NOT NULL DEFAULT '',
+            objectives TEXT NULL,
+            sort INT NOT NULL DEFAULT 0,
+            KEY idx_scheme (scheme_id, sort)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS trainings (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(190) NOT NULL,
+            description TEXT NULL,
+            resources TEXT NULL,
+            due_date DATE NULL,
+            created_by INT UNSIGNED NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            created_at DATETIME NOT NULL,
+            KEY idx_status (status)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS training_assignees (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            training_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'todo',
+            proof_note TEXT NULL,
+            submitted_at DATETIME NULL,
+            review_note VARCHAR(2000) NOT NULL DEFAULT '',
+            reviewed_by INT UNSIGNED NULL,
+            reviewed_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uq_item_user (training_id, user_id),
+            KEY idx_user (user_id, status)
+        ) $t",
     ];
 }
 
@@ -450,6 +519,9 @@ function column_sql(): array
         ['attendance', 'work_type', "VARCHAR(60) NOT NULL DEFAULT ''"],
         ['attendance', 'work_note', 'TEXT NULL'],
         ['attendance', 'last_stop', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        // v9: lesson plans posted by admin, and plans that follow the scheme of work
+        ['lesson_plans', 'assignment_id', 'INT UNSIGNED NULL'],
+        ['lesson_plans', 'scheme_item_id', 'INT UNSIGNED NULL'],
     ];
 }
 

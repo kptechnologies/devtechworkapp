@@ -27,6 +27,10 @@ if (!is_admin($me)) {
         // Lesson evidence (including photos of pupils): only the staff member who took it, and admins.
         'lprep', 'lplan' => q('SELECT user_id FROM lesson_plans WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'lclass', 'lwork' => q('SELECT user_id FROM lesson_sessions WHERE id = ?', [$a['owner_id']])->fetchColumn(),
+        // Admin's lesson brief and training materials: the staff it was given to. Training proof: the staff member who sent it.
+        'lbrief' => q('SELECT user_id FROM lesson_plans WHERE assignment_id = ? AND user_id = ?', [$a['owner_id'], $me['id']])->fetchColumn(),
+        'trainref' => q('SELECT user_id FROM training_assignees WHERE training_id = ? AND user_id = ?', [$a['owner_id'], $me['id']])->fetchColumn(),
+        'trainproof' => q('SELECT user_id FROM training_assignees WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         // Job photos: whoever logged the job and the staff currently on it.
         'jobnote' => q('SELECT ? FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ? AND (j.created_by = ?
                         OR EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL))',

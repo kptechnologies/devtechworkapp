@@ -215,12 +215,27 @@ function build_admin_digest(array $rs): array
         }
     }
 
-    $review = lesson_badge(['role' => 'admin']);
+    $train = training_badge(['role' => 'admin']);
+    $review = lesson_badge(['role' => 'admin']) - $train;
     if ($review) {
         $html .= digest_section('Lessons to review', '<p style="font-size:13px;margin:4px 0">' . $review . ' lesson plan' . ($review === 1 ? '' : 's')
             . ' or class record' . ($review === 1 ? '' : 's') . ' waiting for you on the Lessons page.</p>', $review);
         $count += $review;
         $summary[] = $review . ' lesson' . ($review === 1 ? '' : 's') . ' to review';
+    }
+    if ($train) {
+        $html .= digest_section('Training to check', '<p style="font-size:13px;margin:4px 0">' . $train . ' staff training submission' . ($train === 1 ? '' : 's')
+            . ' waiting for you on the Lessons page, Training tab.</p>', $train);
+        $count += $train;
+    }
+    $unprepared = q("SELECT p.topic, p.school, p.planned_date, u.name FROM lesson_plans p JOIN users u ON u.id = p.user_id
+        WHERE p.status = 'assigned' AND p.planned_date < ? AND p.planned_date >= ? ORDER BY p.planned_date, u.name LIMIT 50",
+        [today(), date('Y-m-d', strtotime('-14 days'))])->fetchAll();
+    if ($unprepared) {
+        $items = array_map(fn($p) => '<li>' . htmlspecialchars($p['name']) . ': ' . htmlspecialchars($p['topic']) . ($p['school'] ? ' at ' . htmlspecialchars($p['school']) : '')
+            . ', ' . date('D j M', strtotime($p['planned_date'])) . '</li>', $unprepared);
+        $html .= digest_section('Posted lessons not prepared', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($unprepared));
+        $count += count($unprepared);
     }
 
     // Overtime claims waiting for the admin's decision before they reach payroll.
@@ -259,11 +274,29 @@ function build_staff_digest(int $uid): array
             $count += count($list);
         }
     }
-    $returned = lesson_badge(['id' => $uid, 'role' => 'staff']);
+    $returned = lessons_returned_count($uid);
     if ($returned) {
         $html .= digest_section('Lessons returned to you', '<p style="font-size:13px">' . $returned . ' lesson plan or class record'
             . ($returned === 1 ? ' was' : 's were') . ' returned. Open Lessons in the portal, fix them and resubmit.</p>', $returned);
         $count += $returned;
+    }
+    $prep = q("SELECT topic, school, planned_date FROM lesson_plans WHERE user_id = ? AND status = 'assigned' AND planned_date <= ? ORDER BY planned_date",
+        [$uid, date('Y-m-d', strtotime('+1 day'))])->fetchAll();
+    if ($prep) {
+        $items = array_map(fn($p) => '<li>' . htmlspecialchars($p['topic']) . ($p['school'] ? ' at ' . htmlspecialchars($p['school']) : '') . ', '
+            . date('D j M', strtotime($p['planned_date'])) . ($p['planned_date'] < $t ? ' (overdue)' : '') . '</li>', $prep);
+        $html .= digest_section('Lessons to prepare', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items)
+            . '</ul><p style="font-size:13px">Build each project yourself and upload screenshots before class.</p>', count($prep));
+        $count += count($prep);
+    }
+    $train = q("SELECT t.title, t.due_date, ta.status FROM training_assignees ta JOIN trainings t ON t.id = ta.training_id
+        WHERE ta.user_id = ? AND t.status = 'open' AND (ta.status = 'returned' OR (ta.status = 'todo' AND t.due_date <= ?)) ORDER BY t.due_date",
+        [$uid, date('Y-m-d', strtotime('+3 days'))])->fetchAll();
+    if ($train) {
+        $items = array_map(fn($x) => '<li>' . htmlspecialchars($x['title']) . ($x['status'] === 'returned' ? ' (returned to you)'
+            : ', due ' . date('D j M', strtotime($x['due_date'])) . ($x['due_date'] < $t ? ' (overdue)' : '')) . '</li>', $train);
+        $html .= digest_section('Training to finish', '<ul style="font-size:13px;padding-left:18px;margin:0">' . implode('', $items) . '</ul>', count($train));
+        $count += count($train);
     }
     $missed = q('SELECT work_date FROM attendance WHERE user_id = ? AND out_missed = 1 AND work_date >= ? ORDER BY work_date DESC',
         [$uid, date('Y-m-d', strtotime('-3 days'))])->fetchAll(PDO::FETCH_COLUMN);

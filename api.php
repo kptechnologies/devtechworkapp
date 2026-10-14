@@ -12,6 +12,7 @@ require __DIR__ . '/inc/api_payroll.php';
 require __DIR__ . '/inc/company.php';
 require __DIR__ . '/inc/api_queries.php';
 require __DIR__ . '/inc/api_lessons.php';
+require __DIR__ . '/inc/api_learning.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -46,7 +47,8 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'jobs_list', 'job_get', 'jobs_export', 'staff_profile', 'tools_list', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
-    'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools'];
+    'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
+    'trainings_list', 'training_get'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -249,6 +251,10 @@ function act_attachment_delete(array $in, array $me): void
         if (in_array($a['owner_type'], ['lclass', 'lwork'], true)
             && q('SELECT status FROM lesson_sessions WHERE id = ?', [$a['owner_id']])->fetchColumn() !== 'returned') {
             fail('Class photos can only be changed while the class is returned to you.', 403);
+        }
+        if ($a['owner_type'] === 'trainproof'
+            && !in_array(q('SELECT status FROM training_assignees WHERE id = ?', [$a['owner_id']])->fetchColumn(), ['todo', 'returned'], true)) {
+            fail('Training proof is locked once submitted, unless it is returned to you.', 403);
         }
         if ($a['owner_type'] === 'jobnote') {
             $st = q('SELECT j.status FROM job_updates ju JOIN jobs j ON j.id = ju.job_id WHERE ju.id = ?', [$a['owner_id']])->fetchColumn();
