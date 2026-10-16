@@ -23,6 +23,9 @@ function act_staff_profile(array $in, array $me): void
 {
     $uid = is_admin($me) && !empty($in['id']) ? (int)$in['id'] : $me['id'];
     $u = profile_user($uid);
+    if (!is_admin($me)) {
+        unset($u['salary']); // pay figures are admin-only
+    }
     $tools = q('SELECT id, name, category, serial_no, tag_code, `condition`, issued_at FROM tools WHERE holder_id = ? ORDER BY name', [$uid])->fetchAll();
     $jobs = q(JOB_LIST_SQL . " WHERE EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL)
         ORDER BY j.status IN ('done','cancelled'), j.id DESC LIMIT 30", [$uid])->fetchAll();

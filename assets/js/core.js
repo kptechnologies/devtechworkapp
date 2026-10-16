@@ -450,7 +450,7 @@
       { href: 'timetable', icon: 'calendar-time', text: 'Timetable' },
       { href: 'reports', icon: 'clipboard-text', text: 'My reports' },
       { href: 'attendance', icon: 'clock-check', text: 'My attendance' },
-      { href: 'my-pay', icon: 'report-money', text: 'My pay' },
+      { href: 'my-pay', icon: 'calendar-stats', text: 'My record' },
       { href: 'queries', icon: 'alert-triangle', text: 'My queries', badge: 'queries' },
       { href: 'requests', icon: 'cash', text: 'Funding requests' },
       { href: 'profile', icon: 'user', text: 'Profile', mobile: true },

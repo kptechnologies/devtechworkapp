@@ -212,6 +212,23 @@ function payroll_summary(array $c): array
         'bank_name' => $c['user']['bank_name'], 'bank_account' => $c['user']['bank_account']];
 }
 
+/** What a staff member sees of their own month: the attendance record, never money. */
+function payroll_staff_view(array $c): array
+{
+    return [
+        'locked' => $c['locked'],
+        'locked_at' => $c['locked_at'] ?? null,
+        'month' => $c['month'],
+        'rules_from' => $c['rules_from'],
+        'counts' => $c['counts'],
+        'days' => array_map(fn($d) => [
+            'date' => $d['date'], 'status' => $d['status'], 'in' => $d['in'], 'out' => $d['out'],
+            'items' => array_map(fn($i) => ['code' => $i['code'], 'label' => $i['label'], 'waived' => $i['waived'], 'note' => $i['note'] ?? null], $d['items']),
+            'overtime' => $d['overtime'] ? ['out_at' => $d['overtime']['out_at'], 'state' => $d['overtime']['state']] : null,
+        ], $c['days']),
+    ];
+}
+
 /* ----------------------------------------------------------------- actions */
 
 function act_payroll_list(array $in, array $me): void
@@ -224,8 +241,14 @@ function act_payroll_list(array $in, array $me): void
 
 function act_payroll_detail(array $in, array $me): void
 {
-    $uid = is_admin($me) && !empty($in['user_id']) ? (int)$in['user_id'] : $me['id'];
-    json_out(['ok' => true, 'rules' => pay_rules(), 'marks' => PAY_MARKS] + payroll_calc($uid, month_in($in)));
+    if (is_admin($me)) {
+        $uid = !empty($in['user_id']) ? (int)$in['user_id'] : $me['id'];
+        json_out(['ok' => true, 'rules' => pay_rules(), 'marks' => PAY_MARKS] + payroll_calc($uid, month_in($in)));
+    }
+    // Staff see their record but no amounts; deductions are for admins only.
+    $r = pay_rules();
+    $rules = ['report_deadline' => $r['report_deadline'], 'very_late_min' => $r['very_late_min'], 'overtime_min' => $r['overtime_min']];
+    json_out(['ok' => true, 'rules' => $rules] + payroll_staff_view(payroll_calc($me['id'], month_in($in))));
 }
 
 function act_payroll_mark(array $in, array $me): void
@@ -317,8 +340,10 @@ function payroll_add_adjustment(int $uid, string $month, string $label, float $a
         [$uid, $month, $label, $amount, $note, $me['id']]);
     $id = (int)db()->lastInsertId();
     audit('pay_adjust', 'user', $uid, ['month' => $month, 'label' => $label, 'amount' => $amount]);
-    notify([$uid], 'payroll', ($amount < 0 ? 'Salary deduction: ' : 'Salary addition: ') . $label,
-        ($amount < 0 ? '-' : '+') . money_fmt(abs($amount)) . ' for ' . date('F Y', strtotime($month . '-01')), 'my-pay');
+    // Deductions are admin-only, so staff aren't told about charges; bonuses get a note without the amount.
+    if ($amount > 0) {
+        notify([$uid], 'payroll', 'Pay addition: ' . $label, 'Added to your ' . date('F Y', strtotime($month . '-01')) . ' pay.', 'my-pay');
+    }
     return $id;
 }
 
