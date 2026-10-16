@@ -76,7 +76,8 @@ function load_txn(int $id, array $me): array
     if (!$t) {
         fail('Transaction not found.', 404);
     }
-    if (!is_admin($me) && (int)$t['user_id'] !== $me['id']) {
+    // Managers see other people's expenses to review them; payments and adjustments stay with the admin.
+    if (!is_admin($me) && (int)$t['user_id'] !== $me['id'] && !(can_review_money($me) && $t['kind'] === 'debit')) {
         fail('You can only view your own transactions.', 403);
     }
     return $t;
@@ -162,7 +163,7 @@ function act_expense_save(array $in, array $me): void
     touch_change();
 
     if (!is_admin($me)) {
-        notify_admins('expense', ($existing ? 'Updated expense: ' : 'New expense: ') . $me['name'] . ' · ' . money_fmt($amount),
+        notify_approvers('expense', ($existing ? 'Updated expense: ' : 'New expense: ') . $me['name'] . ' · ' . money_fmt($amount),
             $category . ' — ' . $desc, 'txn/' . $id, false);
     }
     json_out(['ok' => true, 'id' => $id, 'wallet' => wallet_stats($ownerId)]);
@@ -186,7 +187,7 @@ function act_expense_reply(array $in, array $me): void
     save_uploads('txn', (int)$t['id'], $me['id']);
     audit('expense_reply', 'txn', (int)$t['id'], ['reply' => $reply]);
     touch_change();
-    notify_admins('expense', $me['name'] . ' answered your query · ' . money_fmt((float)$t['amount']), $reply, 'txn/' . $t['id'], false);
+    notify_approvers('expense', $me['name'] . ' answered your query · ' . money_fmt((float)$t['amount']), $reply, 'txn/' . $t['id'], false);
     json_out(['ok' => true]);
 }
 
@@ -226,7 +227,7 @@ function act_credit_send(array $in, array $me): void
     require_admin();
     $ids = array_values(array_unique(array_map('intval', (array)($in['user_ids'] ?? []))));
     if (!empty($in['all'])) {
-        $ids = array_map('intval', q("SELECT id FROM users WHERE role IN ('staff','subadmin') AND active = 1")->fetchAll(PDO::FETCH_COLUMN));
+        $ids = array_map('intval', q("SELECT id FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1")->fetchAll(PDO::FETCH_COLUMN));
     }
     $amount = money_in($in['amount'] ?? 0);
     $date = (string)($in['txn_date'] ?? today());
@@ -306,7 +307,9 @@ function act_adjust(array $in, array $me): void
 
 function act_txn_review(array $in, array $me): void
 {
-    require_admin();
+    if (!can_review_money($me)) {
+        fail('Only admins and managers can review expenses.', 403);
+    }
     $ids = array_values(array_unique(array_map('intval', (array)($in['ids'] ?? [$in['id'] ?? 0]))));
     $status = (string)($in['status'] ?? '');
     $note = str_in($in['note'] ?? '', 2000);
@@ -321,6 +324,9 @@ function act_txn_review(array $in, array $me): void
         $t = q('SELECT ' . TXN_COLS . ' ' . TXN_JOINS . ' WHERE w.id = ?', [$id])->fetch();
         if (!$t || $t['kind'] !== 'debit') {
             continue;
+        }
+        if ((int)$t['user_id'] === $me['id'] && !is_admin($me)) {
+            fail('Someone else has to review your own expenses.', 403);
         }
         q('UPDATE wallet_txns SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW() WHERE id = ?',
             [$status, $note !== '' ? $note : $t['review_note'], $me['id'], $id]);
@@ -374,7 +380,12 @@ function ledger_where(array $in, array &$params): string
 
 function act_ledger(array $in, array $me): void
 {
-    require_admin();
+    if (!can_review_money($me)) {
+        fail('Only admins and managers can do that.', 403);
+    }
+    if (!is_admin($me)) {
+        $in['kind'] = 'debit'; // managers review expenses only
+    }
     $params = [];
     $where = ledger_where($in, $params);
     $rows = q('SELECT ' . TXN_COLS . ' ' . TXN_JOINS . " WHERE $where ORDER BY w.txn_date DESC, w.id DESC LIMIT 2000", $params)->fetchAll();
@@ -418,7 +429,7 @@ function act_requests_list(array $in, array $me): void
 {
     $params = [];
     $w = '1=1';
-    if (!is_admin($me)) {
+    if (!can_review_money($me)) {
         $w .= ' AND f.user_id = ?';
         $params[] = $me['id'];
     }
@@ -455,7 +466,7 @@ function act_request_save(array $in, array $me): void
     save_uploads('request', $id, $me['id']);
     audit('request_create', 'request', $id, ['amount' => $amount]);
     touch_change();
-    notify_admins('request', 'Funding request: ' . $me['name'] . ' · ' . money_fmt($amount), $purpose, 'requests');
+    notify_approvers('request', 'Funding request: ' . $me['name'] . ' · ' . money_fmt($amount), $purpose, 'requests');
     json_out(['ok' => true, 'id' => $id]);
 }
 
@@ -476,10 +487,15 @@ function act_request_cancel(array $in, array $me): void
 
 function act_request_decide(array $in, array $me): void
 {
-    require_admin();
+    if (!can_review_money($me)) {
+        fail('Only admins and managers can decide funding requests.', 403);
+    }
     $r = q('SELECT f.*, u.name AS user_name FROM fund_requests f JOIN users u ON u.id = f.user_id WHERE f.id = ?', [(int)($in['id'] ?? 0)])->fetch();
     if (!$r) {
         fail('Request not found.', 404);
+    }
+    if ((int)$r['user_id'] === $me['id'] && !is_admin($me)) {
+        fail('Someone else has to decide your own funding request.', 403);
     }
     if ($r['status'] !== 'pending') {
         fail('This request was already decided.');

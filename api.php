@@ -198,10 +198,12 @@ function act_pulse(array $in, array $me): void
         'lessons' => lesson_badge($me),
         'memos'   => memo_badge($me),
     ] + job_badges($me);
-    if (is_admin($me)) {
+    if (can_review_money($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
         $out['pending_requests'] = (int)q("SELECT COUNT(*) FROM fund_requests WHERE status='pending'")->fetchColumn();
-        $out['pending_overtime'] = count(payroll_overtime_pending());
+        if (is_admin($me)) {
+            $out['pending_overtime'] = count(payroll_overtime_pending());
+        }
     }
     maybe_run_reminders(); // fallback for hosts without a cron job
     json_out($out);

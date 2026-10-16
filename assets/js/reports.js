@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — daily work reports: wizard, list, detail, issues board */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, isAdmin, isManager } = App;
+  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, isAdmin, isManagement } = App;
 
   const fieldsById = () => {
     const out = {};
@@ -193,7 +193,7 @@
     }
     // Open job orders to pick from, and today's clock-in to pre-fill the hours.
     App.myJobs = [];
-    if (!id || !isManager()) {
+    if (!id || !isManagement()) {
       try { App.myJobs = (await api('jobs_list', { query: { mine: 1, open: 1 } })).items; } catch { /* optional */ }
     }
     // Today's visits pre-fill the hours (first clock-in, last clock-out), the school, the work and the job orders tagged.
@@ -369,7 +369,7 @@
   const filterState = { from: '', to: '', user_id: '', location: '', finished: '', q: '' };
 
   async function reportsList(ctx) {
-    const admin = isManager();
+    const admin = isManagement();
     const staff = admin ? (await api('users_list')).items : [];
     const statuses = ['Yes – completed', 'Partially completed', 'No – not completed'];
     ctx.el.innerHTML = `
@@ -431,7 +431,7 @@
     const el = App.drawer('Report', App.loading());
     let r;
     try { r = (await api('report_get', { query: { id } })).report; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isManager();
+    const admin = isManagement();
     const fields = fieldsById();
     const d = r.data || {};
     const secs = App.cfg.schema.map((sec) => {

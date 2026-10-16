@@ -102,7 +102,7 @@ function load_lesson_plan(int $id, array $me): array
     if (!$r) {
         fail('Lesson plan not found.', 404);
     }
-    if (!is_manager($me) && (int)$r['user_id'] !== $me['id']) {
+    if (!is_management($me) && (int)$r['user_id'] !== $me['id']) {
         fail('You can only open your own lesson plans.', 403);
     }
     return lesson_plan_row($r);
@@ -114,7 +114,7 @@ function load_lesson_session(int $id, array $me): array
     if (!$r) {
         fail('Class record not found.', 404);
     }
-    if (!is_manager($me) && (int)$r['user_id'] !== $me['id']) {
+    if (!is_management($me) && (int)$r['user_id'] !== $me['id']) {
         fail('You can only open your own classes.', 403);
     }
     return lesson_session_row($r);
@@ -149,7 +149,7 @@ function lesson_session_checks(int $uid, string $school, string $date, string $p
 /** Pulse badge: admins see items waiting for review; staff see items returned to them. */
 function lesson_badge(array $me): int
 {
-    if (is_manager($me)) {
+    if (is_management($me)) {
         return (int)q("SELECT (SELECT COUNT(*) FROM lesson_plans WHERE status = 'submitted') + (SELECT COUNT(*) FROM lesson_sessions WHERE status = 'submitted')")->fetchColumn()
             + training_badge($me);
     }
@@ -167,7 +167,7 @@ function lessons_returned_count(int $uid): int
 /** Staff home for lessons: their plans (newest first, with class counts) and their recent classes. Admin: filtered lists. */
 function act_lessons_list(array $in, array $me): void
 {
-    $admin = is_manager($me);
+    $admin = is_management($me);
     $from = valid_date($in['from'] ?? null) ? $in['from'] : date('Y-m-d', strtotime('-30 days'));
     $to = valid_date($in['to'] ?? null) ? $in['to'] : today();
     $pw = ['(p.planned_date IS NULL OR p.planned_date BETWEEN ? AND ? OR p.status IN (\'returned\', \'assigned\') OR DATE(p.submitted_at) BETWEEN ? AND ?)'];
@@ -286,7 +286,7 @@ function act_lesson_plan_save(array $in, array $me): void
     $slotId = (int)($in['slot_id'] ?? ($old['slot_id'] ?? 0)) ?: null;
     if ($slotId) {
         $slot = q('SELECT teacher_id, class_name FROM timetable_slots WHERE id = ? AND active = 1', [$slotId])->fetch();
-        if (!$slot || (!is_manager($me) && (int)$slot['teacher_id'] !== $me['id'])) {
+        if (!$slot || (!is_management($me) && (int)$slot['teacher_id'] !== $me['id'])) {
             $slotId = null;
         } elseif ($className === '') {
             $className = $slot['class_name'];
@@ -504,7 +504,7 @@ function act_lesson_sessions_save(array $in, array $me): void
 /** Admin approves or returns a plan or a class with a note. Returning needs a note saying what to fix. */
 function act_lesson_review(array $in, array $me): void
 {
-    require_manager();
+    require_management();
     $type = ($in['type'] ?? '') === 'plan' ? 'plan' : 'session';
     $decision = ($in['decision'] ?? '') === 'return' ? 'returned' : 'approved';
     $note = str_in($in['note'] ?? '', 2000);
@@ -553,7 +553,7 @@ function teaching_visits_without_evidence(string $from, string $to, ?int $uid = 
 /** Per staff member over a range: plans, classes, pupils reached, preparation and evidence, outstanding returns. */
 function lesson_compliance(string $from, string $to, ?int $uid = null): array
 {
-    $w = "u.active = 1 AND u.role IN ('staff','subadmin')";
+    $w = "u.active = 1 AND u.role IN ('staff','supervisor','subadmin','manager')";
     $p = [];
     if ($uid) {
         $w = 'u.id = ?';
@@ -603,14 +603,14 @@ function lesson_compliance(string $from, string $to, ?int $uid = null): array
 function act_lessons_compliance(array $in, array $me): void
 {
     [$from, $to] = report_range($in);
-    $uid = is_manager($me) ? ((int)($in['user_id'] ?? 0) ?: null) : $me['id'];
+    $uid = is_management($me) ? ((int)($in['user_id'] ?? 0) ?: null) : $me['id'];
     json_out(['ok' => true, 'from' => $from, 'to' => $to] + lesson_compliance($from, $to, $uid));
 }
 
 /** Per school: classes taught, topics covered, staff and pupils, and the latest photos. */
 function act_lessons_schools(array $in, array $me): void
 {
-    require_manager();
+    require_management();
     [$from, $to] = report_range($in);
     $rows = q("SELECT s.school, COUNT(*) AS classes, COUNT(DISTINCT s.class_name) AS class_groups, COALESCE(SUM(s.students_present), 0) AS pupils,
         GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR ', ') AS staff, MAX(s.session_date) AS last_date

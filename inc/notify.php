@@ -68,10 +68,10 @@ function notify_admins(string $type, string $title, string $body = '', string $l
     notify($ids, $type, $title, $body, $link, $email);
 }
 
-/** Admins and sub admins: for work matters (jobs, memos). Money stays with notify_admins(). */
+/** All management roles: for work matters (jobs, memos). Money stays with notify_admins(). */
 function notify_managers(string $type, string $title, string $body = '', string $link = '', bool $email = true, int $except = 0): void
 {
-    $ids = q("SELECT id FROM users WHERE role IN ('admin','subadmin') AND active = 1 AND id <> ?", [$except])->fetchAll(PDO::FETCH_COLUMN);
+    $ids = q("SELECT id FROM users WHERE role IN ('admin','manager','subadmin','supervisor') AND active = 1 AND id <> ?", [$except])->fetchAll(PDO::FETCH_COLUMN);
     notify($ids, $type, $title, $body, $link, $email);
 }
 
@@ -150,4 +150,11 @@ function smtp_send(array $s, string $from, string $to, array $headers, string $b
     $cmd('QUIT', [221]);
     fclose($fp);
     return true;
+}
+
+/** Admins and managers: the people who give more time and decide expenses and funding requests. */
+function notify_approvers(string $type, string $title, string $body = '', string $link = '', bool $email = true, int $except = 0): void
+{
+    $ids = q("SELECT id FROM users WHERE role IN ('admin','manager') AND active = 1 AND id <> ?", [$except])->fetchAll(PDO::FETCH_COLUMN);
+    notify($ids, $type, $title, $body, $link, $email);
 }

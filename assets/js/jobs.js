@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — job orders: list, detail with timeline, assign, complete with photos, verify */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, ago, isAdmin, isSubAdmin, isManager } = App;
+  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, ago, isAdmin, isManagement, canApproveTime } = App;
 
   const JOB_STATUS = {
     requested: ['Requested', 'info'], open: ['Open', 'brand'], in_progress: ['In progress', 'out'], awaiting_check: ['Awaiting check', 'out'],
@@ -97,7 +97,7 @@
   App.route('jobs/:id', async (ctx) => { await jobsList(ctx); openJob(+ctx.params.id); }, { title: 'Job orders', nav: 'jobs', live: true });
 
   async function jobsList(ctx) {
-    const admin = isManager();
+    const admin = isManagement();
     App.setTitle(admin ? 'Job orders' : 'My jobs');
     const tabs = admin ? TABS_ADMIN : TABS_STAFF;
     const staff = admin ? await activeStaff() : [];
@@ -185,28 +185,28 @@
     } catch (err) { App.fail(err); }
   };
 
-  /** A pending request for more time: Approve / Refuse for the admin, Recommend for a sub admin. */
+  /** A pending request for more time: Approve / Refuse for admins and managers, Recommend for sub admins and supervisors. */
   const extBox = (x) => `<div class="ext-box" data-ext="${x.id}"><div class="small"><i class="ti ti-clock-plus"></i> <b>${esc(x.user_name)}</b> asked for more time,
     until <b>${esc(dueLabel(x.new_due_date, x.new_due_time))}</b> <span class="faint">· ${esc(ago(x.created_at))}</span></div>
     <div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(x.reason)}</div>
     ${x.recommendation ? `<div class="small" style="margin-top:6px"><span class="pill ${x.recommendation === 'approve' ? 'in' : 'out'}"><i class="ti ti-thumb-${x.recommendation === 'approve' ? 'up' : 'down'}"></i>
-      ${esc(x.recommended_by_name || 'Sub admin')} recommends ${x.recommendation === 'approve' ? 'approving' : 'refusing'}</span>${x.recommend_note ? ` <span class="muted">${esc(x.recommend_note)}</span>` : ''}</div>` : ''}
-    ${isAdmin() ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
+      ${esc(x.recommended_by_name || 'Management')} recommends ${x.recommendation === 'approve' ? 'approving' : 'refusing'}</span>${x.recommend_note ? ` <span class="muted">${esc(x.recommend_note)}</span>` : ''}</div>` : ''}
+    ${canApproveTime() && x.user_id !== App.user.id ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
       <button class="btn sm danger" data-ext-decide="reject"><i class="ti ti-x"></i>Refuse</button></div>`
       : x.user_id === App.user.id ? App.extWaitHtml(x)
-      : isSubAdmin() ? `<div class="faint small" style="margin-top:4px">Only the admin can give more time. Tell them what you think:</div>
+      : isManagement() && !canApproveTime() ? `<div class="faint small" style="margin-top:4px">Only an admin or manager can give more time. Tell them what you think:</div>
         <div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" data-ext-recommend="approve"><i class="ti ti-thumb-up"></i>Recommend approve</button>
         <button class="btn sm" data-ext-recommend="refuse"><i class="ti ti-thumb-down"></i>Recommend refuse</button></div>`
       : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
 
   /** A sub admin's recommendation on a request for more time; the admin still decides. */
   async function recommendExtension(btn, extId, decision, done) {
-    const note = await App.confirm(decision === 'approve' ? 'Recommend more time?' : 'Recommend refusing?', 'The admin is told and makes the final decision.',
-      { ok: 'Send to admin', input: { label: decision === 'approve' ? 'Note for the admin (optional)' : 'Why?', required: decision !== 'approve' } });
+    const note = await App.confirm(decision === 'approve' ? 'Recommend more time?' : 'Recommend refusing?', 'The admins and managers are told, and one of them decides.',
+      { ok: 'Send recommendation', input: { label: decision === 'approve' ? 'Note for the admin (optional)' : 'Why?', required: decision !== 'approve' } });
     if (note === null || (decision !== 'approve' && !note)) return;
     try {
       await App.busy(btn, () => api('job_extension_recommend', { data: { extension_id: extId, decision, note } }));
-      toast('Recommendation sent to the admin');
+      toast('Recommendation sent');
       App.current?.refresh?.();
       done && done();
     } catch (err) { App.fail(err); }
@@ -326,7 +326,7 @@
     const render = async () => {
       let j;
       try { j = (await api('job_get', { query: { id } })).job; } catch (e) { App.closeTop(); App.fail(e); return; }
-      const admin = isManager();
+      const admin = isManagement();
       const mine = j.is_assignee;
       const active = ['open', 'in_progress', 'returned'].includes(j.status);
       $('.drawer-head h2', el).textContent = `${j.ref} · ${j.title}`;
@@ -566,7 +566,7 @@
 
   /* ------------------------------------------------------- create / edit */
   async function editJob(j, prefill = null, done = null) {
-    const admin = isManager();
+    const admin = isManagement();
     const isNew = !j;
     const v = { title: '', client_type: 'school', client_name: '', location: '', contact_name: '', contact_phone: '', description: '', priority: 'normal', due_date: '', due_time: '', ...(j || {}), ...(prefill || {}) };
     const staff = admin && isNew ? await activeStaff() : [];

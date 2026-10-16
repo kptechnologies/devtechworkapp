@@ -1,6 +1,6 @@
-/* DevTech Staff Portal — memos to staff, notes to management, and sub admin requests to the admin */
+/* DevTech Staff Portal — memos to staff, notes to management, and management requests to the admin */
 (() => {
-  const { $, $$, esc, api, toast, fmtDateTime, ago, isAdmin, isSubAdmin, isManager } = App;
+  const { $, $$, esc, api, toast, fmtDateTime, ago, isAdmin, isManagement, roleLabel } = App;
 
   const KIND = { memo: ['Memo', 'mail', 'brand'], note: ['Note', 'note', 'info'], request: ['Request', 'hand-stop', 'out'] };
   const STATUS = { approved: ['Approved', 'in'], declined: ['Declined', 'bad'], open: ['Waiting for admin', 'out'] };
@@ -13,12 +13,12 @@
   async function memosView(ctx) {
     const boxes = [['inbox', 'Inbox', 'inbox'], ['sent', 'Sent', 'send']].concat(isAdmin() ? [['requests', 'Requests', 'hand-stop']] : []);
     if (!boxes.some(([k]) => k === box)) box = 'inbox';
-    const intro = isManager() ? 'Send memos to staff, read notes from staff' + (isSubAdmin() ? ', and make requests to the admin.' : ', and answer sub admin requests.')
+    const intro = isManagement() ? 'Send memos to staff, read notes from staff' + (isAdmin() ? ', and answer requests from management.' : ', and make requests to the admin.')
       : 'Send a note or memo to management, and read memos sent to you.';
     ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>${isManager() ? 'Memos & requests' : 'Notes & memos'}</h1><p class="muted">${esc(intro)}</p></div>
-        <div class="actions">${isSubAdmin() ? '<button class="btn" id="mm-req"><i class="ti ti-hand-stop"></i>Request to admin</button>' : ''}
-          <button class="btn primary" id="mm-new"><i class="ti ti-pencil"></i>${isManager() ? 'New memo' : 'Write to management'}</button></div></div>
+      <div class="page-head"><div><h1>${isManagement() ? 'Memos & requests' : 'Notes & memos'}</h1><p class="muted">${esc(intro)}</p></div>
+        <div class="actions">${isManagement() && !isAdmin() ? '<button class="btn" id="mm-req"><i class="ti ti-hand-stop"></i>Request to admin</button>' : ''}
+          <button class="btn primary" id="mm-new"><i class="ti ti-pencil"></i>${isManagement() ? 'New memo' : 'Write to management'}</button></div></div>
       <div class="seg" id="mm-tabs" style="margin-bottom:12px">${boxes.map(([k, l, i]) => `<button data-b="${k}" class="${k === box ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}</button>`).join('')}</div>
       <div class="card" id="mm-list">${App.loading()}</div>`;
     const load = async () => {
@@ -40,7 +40,7 @@
       $$('#mm-tabs button', ctx.el).forEach((x) => x.classList.toggle('on', x === b));
       load().catch(App.fail);
     }));
-    $('#mm-new', ctx.el).addEventListener('click', () => compose(isManager() ? 'memo' : 'note'));
+    $('#mm-new', ctx.el).addEventListener('click', () => compose(isManagement() ? 'memo' : 'note'));
     $('#mm-req', ctx.el)?.addEventListener('click', () => compose('request'));
     ctx.refresh = () => load().catch(() => {});
     await load();
@@ -49,21 +49,21 @@
   /** Write a memo, a note to management, or a request to the admin. */
   async function compose(kind) {
     let people = [];
-    if (kind === 'memo' && isManager()) {
+    if (kind === 'memo' && isManagement()) {
       try { people = (await api('memo_people')).items; } catch (e) { App.fail(e); return; }
     }
-    const title = kind === 'request' ? 'Request to the admin' : isManager() ? 'New memo' : 'Write to management';
+    const title = kind === 'request' ? 'Request to the admin' : isManagement() ? 'New memo' : 'Write to management';
     const toField = kind === 'request' ? '<p class="muted" style="margin-bottom:12px">The admin approves or declines it, and you are told the answer.</p>'
-      : !isManager() ? `<div class="field"><div class="label">Type</div><div class="opts">
+      : !isManagement() ? `<div class="field"><div class="label">Type</div><div class="opts">
           <label class="opt"><input type="radio" name="kind" value="note" checked><span><i class="ti ti-note"></i>Note</span></label>
           <label class="opt"><input type="radio" name="kind" value="memo"><span><i class="ti ti-mail"></i>Memo</span></label></div>
-          <div class="help">Goes to the admin and sub admins.</div></div>`
+          <div class="help">Goes to the admin, managers, sub admins and supervisors.</div></div>`
       : `<div class="field" data-field="audience"><div class="label">To</div><div class="opts">
           <label class="opt"><input type="radio" name="audience" value="all_staff" checked><span><i class="ti ti-users"></i>All staff</span></label>
           <label class="opt"><input type="radio" name="audience" value="selected"><span><i class="ti ti-user-check"></i>Choose people</span></label>
           <label class="opt"><input type="radio" name="audience" value="management"><span><i class="ti ti-shield"></i>Management</span></label></div></div>
         <div class="field hide" id="mc-people"><div class="label">People</div><div class="opts" style="max-height:220px;overflow:auto">${people.map((u) => `<label class="opt"><input type="checkbox" data-multi="1" name="user_ids" value="${u.id}">
-          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(u.name)}${u.role !== 'staff' ? ` <span class="faint small">(${u.role === 'admin' ? 'admin' : 'sub admin'})</span>` : ''}</span></label>`).join('')}</div></div>`;
+          <span><i class="ti ti-check" style="font-size:14px"></i>${esc(u.name)}${u.role !== 'staff' ? ` <span class="faint small">(${esc(roleLabel(u.role).toLowerCase())})</span>` : ''}</span></label>`).join('')}</div></div>`;
     const el = App.modal(title, `<form id="mc-form" novalidate>${toField}
       <div class="field"><label for="mc-sub">Subject <span class="req">*</span></label><input id="mc-sub" name="subject" autofocus></div>
       <div class="field"><label for="mc-body">Message <span class="req">*</span></label><textarea id="mc-body" name="body" rows="7"></textarea></div></form>`,

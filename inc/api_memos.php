@@ -1,9 +1,9 @@
 <?php
 /**
  * Memos, notes and requests.
- * kind memo:    admin or sub admin → all staff, chosen staff, or management. Staff can also send a memo to management.
- * kind note:    staff → management (admins and sub admins).
- * kind request: sub admin → the admin, who approves or declines it. status: open → approved | declined
+ * kind memo:    any management role → all staff, chosen staff, or management. Staff can also send a memo to management.
+ * kind note:    staff → management (admin, manager, sub admin, supervisor).
+ * kind request: manager, sub admin or supervisor → the admin, who approves or declines it. status: open → approved | declined
  * Recipients are worked out here from the audience; the browser never picks arbitrary people for staff.
  */
 
@@ -19,8 +19,8 @@ function memo_recipient_ids(string $kind, string $audience, array $in, array $me
 {
     $ids = match (true) {
         $kind === 'request' => q("SELECT id FROM users WHERE role = 'admin' AND active = 1")->fetchAll(PDO::FETCH_COLUMN),
-        $audience === 'management' => q("SELECT id FROM users WHERE role IN ('admin','subadmin') AND active = 1")->fetchAll(PDO::FETCH_COLUMN),
-        $audience === 'all_staff' => q("SELECT id FROM users WHERE role IN ('staff','subadmin') AND active = 1")->fetchAll(PDO::FETCH_COLUMN),
+        $audience === 'management' => q("SELECT id FROM users WHERE role IN ('admin','manager','subadmin','supervisor') AND active = 1")->fetchAll(PDO::FETCH_COLUMN),
+        $audience === 'all_staff' => q("SELECT id FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1")->fetchAll(PDO::FETCH_COLUMN),
         $audience === 'selected' => (function () use ($in) {
             $want = array_values(array_unique(array_filter(array_map('intval', (array)($in['user_ids'] ?? [])))));
             if (!$want) {
@@ -99,12 +99,12 @@ function act_memo_get(array $in, array $me): void
     $replies = q('SELECT x.id, x.user_id, x.body, x.created_at, u.name AS user_name FROM memo_replies x JOIN users u ON u.id = x.user_id
         WHERE x.memo_id = ? ORDER BY x.id', [$m['id']])->fetchAll();
     // On a memo to staff, each staff member sees the sender's replies and their own, not other staff's.
-    if (!$m['is_sender'] && !is_manager($me) && in_array($m['audience'], ['all_staff', 'selected'], true)) {
+    if (!$m['is_sender'] && !is_management($me) && in_array($m['audience'], ['all_staff', 'selected'], true)) {
         $replies = array_values(array_filter($replies, fn($x) => in_array((int)$x['user_id'], [$m['sender_id'], $me['id']], true)));
     }
     $m['replies'] = $replies;
     // Who has read it: for the sender and managers only.
-    $m['recipient_list'] = $m['is_sender'] || is_manager($me)
+    $m['recipient_list'] = $m['is_sender'] || is_management($me)
         ? q('SELECT u.id, u.name, r.read_at FROM memo_recipients r JOIN users u ON u.id = r.user_id WHERE r.memo_id = ? ORDER BY u.name', [$m['id']])->fetchAll()
         : [];
     json_out(['ok' => true, 'memo' => $m]);
@@ -113,7 +113,7 @@ function act_memo_get(array $in, array $me): void
 /** Active people a manager can address a memo to. */
 function act_memo_people(array $in, array $me): void
 {
-    require_manager();
+    require_management();
     $rows = q("SELECT id, name, role FROM users WHERE active = 1 AND id <> ? ORDER BY name", [$me['id']])->fetchAll();
     json_out(['ok' => true, 'items' => $rows]);
 }
@@ -122,7 +122,7 @@ function act_memo_send(array $in, array $me): void
 {
     $kind = in_array($in['kind'] ?? '', MEMO_KINDS, true) ? $in['kind'] : 'memo';
     $audience = (string)($in['audience'] ?? 'management');
-    if (is_manager($me)) {
+    if (is_management($me)) {
         if ($kind === 'note') {
             $kind = 'memo';
         }
@@ -191,7 +191,7 @@ function act_memo_reply(array $in, array $me): void
     json_out(['ok' => true]);
 }
 
-/** The admin approves or declines a sub admin's request. */
+/** The admin approves or declines a request from management. */
 function act_memo_decide(array $in, array $me): void
 {
     require_admin();

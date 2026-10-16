@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — class timetables per school, with each class's record of topics taught, this week and coming up */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, isManager } = App;
+  const { $, $$, esc, api, toast, fmtDate, isManagement } = App;
 
   const DAY_SHORT = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
   const st = { view: 'school', school: '' };
@@ -16,7 +16,7 @@
   App.route('timetable', (ctx) => timetableView(ctx), { title: 'Timetable', live: true });
 
   async function timetableView(ctx) {
-    const admin = isManager();
+    const admin = isManagement();
     ctx.el.innerHTML = `<div class="page-head"><div><h1>${admin ? 'Timetables' : 'Timetable'}</h1>
         <p class="muted">Each school's weekly classes. Post the topic and lesson plan before every class, and log what was taught after it.</p></div>
         <div class="actions"><button class="btn primary" id="tt-add"><i class="ti ti-plus"></i>Add period</button></div></div>
@@ -66,7 +66,7 @@
 
   /** Add or edit a period. Staff add their own; admins choose the teacher. */
   async function slotForm(s, data, done) {
-    const admin = isManager();
+    const admin = isManagement();
     let schools = data?.schools || [];
     let teachers = data?.teachers || [];
     if (!schools.length || (admin && !teachers.length)) {

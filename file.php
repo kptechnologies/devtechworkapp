@@ -15,9 +15,10 @@ if (!$a) {
     http_response_code(404);
     exit('Not found.');
 }
-// Sub admins see work files (reports, jobs, lessons, queries, attendance, tools), never money receipts.
-$managerFile = is_subadmin($me) && in_array($a['owner_type'], ['report', 'attend', 'attendout', 'tool', 'avatar', 'query', 'jobnote',
-    'lprep', 'lplan', 'lclass', 'lwork', 'lbrief', 'trainref', 'trainproof'], true);
+// Management sees work files (reports, jobs, lessons, queries, attendance, tools); managers also see expense receipts and request files.
+$managerFile = (is_management($me) && in_array($a['owner_type'], ['report', 'attend', 'attendout', 'tool', 'avatar', 'query', 'jobnote',
+    'lprep', 'lplan', 'lclass', 'lwork', 'lbrief', 'trainref', 'trainproof'], true))
+    || (can_review_money($me) && in_array($a['owner_type'], ['txn', 'request'], true));
 if (!is_admin($me) && !$managerFile) {
     $owner = match ($a['owner_type']) {
         'report'  => q('SELECT user_id FROM reports WHERE id = ?', [$a['owner_id']])->fetchColumn(),

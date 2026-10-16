@@ -173,6 +173,13 @@
   }, { title: 'Overview', admin: true, live: true });
 
   /* ---------------------------------------------------------- staff setup */
+  const ROLE_CHOICES = [
+    ['staff', 'Staff', 'Does the field work: jobs, reports, lessons, attendance.'],
+    ['supervisor', 'Supervisor', 'Runs jobs, tasks, lessons and follow-ups. Proposes queries for management to issue; recommends extra time.'],
+    ['subadmin', 'Sub admin', 'Runs jobs, tasks, lessons, queries and memos. No payroll or wallets; recommends extra time.'],
+    ['manager', 'Manager', 'Everything a sub admin does, plus approving extra time, reviewing expenses, deciding funding requests and managing staff accounts.'],
+    ['admin', 'Admin', 'Full access, including payroll, wallets, company and settings.'],
+  ];
   /** Account modal: name, email, role, active, password. */
   function editUser(u, onSaved) {
     const isNew = !u;
@@ -184,9 +191,8 @@
         <div class="field"><label for="us-p">Phone</label><input type="tel" id="us-p" name="phone" value="${esc(u.phone)}" placeholder="0803 000 0000"></div>
         ${App.schoolsField(u.schools || [])}
         <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
-          <label class="opt"><input type="radio" name="role" value="staff" ${!['admin', 'subadmin'].includes(u.role) ? 'checked' : ''}><span>Staff</span></label>
-          <label class="opt" title="Runs jobs, tasks, lessons, queries and memos. No payroll, wallets or settings; recommends extra time for you to approve."><input type="radio" name="role" value="subadmin" ${u.role === 'subadmin' ? 'checked' : ''}><span>Sub admin</span></label>
-          <label class="opt"><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''}><span>Admin</span></label></div></div>
+          ${ROLE_CHOICES.filter(([r]) => App.isAdmin() || ['staff', 'supervisor', 'subadmin'].includes(r)).map(([r, l, tip]) =>
+            `<label class="opt" title="${esc(tip)}"><input type="radio" name="role" value="${r}" ${(u.role || 'staff') === r ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
           <div class="field"><div class="label">Status</div><label class="check-row" style="padding:9px 12px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}><span>Active (can sign in)</span></label></div></div>
         <div class="field"><label for="us-pw">${isNew ? 'Starting password' : 'Set a new password'} ${isNew ? '<span class="req">*</span>' : ''}</label>
           <div style="display:flex;gap:8px"><input type="text" id="us-pw" name="password" placeholder="${isNew ? 'At least 8 characters' : 'Leave blank to keep the current one'}" autocomplete="new-password">
@@ -223,14 +229,14 @@
         <div class="page-head"><div><h1>Staff setup</h1><p class="muted">${items.filter((u) => u.active).length} active accounts</p></div>
           <div class="actions"><button class="btn primary" id="st-add"><i class="ti ti-user-plus"></i>Add staff</button></div></div>
         ${noPass.length ? `<div class="banner" style="margin-bottom:14px"><i class="ti ti-key"></i>${noPass.length} account${noPass.length > 1 ? 's have' : ' has'} no password yet (created by import). Set one so they can sign in.</div>` : ''}
-        <div class="card"><div class="table-wrap"><table class="tbl"><thead><tr><th>Name</th><th class="hide-sm">Email</th><th class="hide-sm">Phone</th><th>School</th><th class="r">Balance</th><th class="hide-sm">Last report</th><th>Status</th><th></th></tr></thead><tbody>
+        <div class="card"><div class="table-wrap"><table class="tbl"><thead><tr><th>Name</th><th class="hide-sm">Email</th><th class="hide-sm">Phone</th><th>School</th>${App.isAdmin() ? '<th class="r">Balance</th>' : ''}<th class="hide-sm">Last report</th><th>Status</th><th></th></tr></thead><tbody>
           ${items.map((u) => `<tr class="click" data-u="${u.id}" style="${u.active ? '' : 'opacity:.55'}">
             <td><div style="display:flex;gap:8px;align-items:center"><div class="avatar sm">${esc(App.initials(u.name))}</div><div><div style="font-weight:500">${esc(u.name)}</div><div class="faint small mobile-only">${esc(u.email)}</div></div></div></td>
             <td class="hide-sm">${esc(u.email)}</td><td class="hide-sm">${esc(u.phone)}</td><td>${esc(u.location)}</td>
-            <td class="r num ${u.balance < 0 ? 'bad' : ''}">${money(u.balance)}</td>
+            ${'balance' in u ? `<td class="r num ${u.balance < 0 ? 'bad' : ''}">${money(u.balance)}</td>` : ''}
             <td class="hide-sm">${u.last_report ? esc(fmtDate(u.last_report)) : '<span class="faint">—</span>'}</td>
-            <td>${u.role === 'admin' ? '<span class="pill brand">Admin</span>' : u.role === 'subadmin' ? '<span class="pill info">Sub admin</span>' : ''} ${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
-            <td style="white-space:nowrap"><button class="btn sm ghost" data-edit-u aria-label="Account and password" title="Account &amp; password"><i class="ti ti-key"></i></button><i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
+            <td>${u.role !== 'staff' ? `<span class="pill ${u.role === 'admin' ? 'brand' : 'info'}">${esc(App.roleLabel(u.role))}</span>` : ''} ${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
+            <td style="white-space:nowrap">${App.isAdmin() || !['admin', 'manager'].includes(u.role) ? '<button class="btn sm ghost" data-edit-u aria-label="Account and password" title="Account &amp; password"><i class="ti ti-key"></i></button>' : ''}<i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
       $('#st-add', ctx.el).addEventListener('click', () => editUser(null, load));
       $$('[data-u]', ctx.el).forEach((r) => r.addEventListener('click', (e) => {
         if (e.target.closest('[data-edit-u]')) editUser(items.find((u) => u.id === +r.dataset.u), load);
@@ -239,7 +245,7 @@
     };
     ctx.refresh = () => load().catch(() => {});
     await load();
-  }, { title: 'Staff setup', admin: true });
+  }, { title: 'Staff setup', can: App.canManageAccounts });
 
   /** Sub admin: the team list, view only. Accounts, passwords and balances stay with the admin. */
   App.route('staff', async (ctx) => {
@@ -249,7 +255,7 @@
         <div class="page-head"><div><h1>Staff</h1><p class="muted">${items.length} active people. Open someone to see their jobs, attendance, reports and queries.</p></div></div>
         <div class="card"><div class="table-wrap"><table class="tbl"><thead><tr><th>Name</th><th class="hide-sm">Phone</th><th>School</th><th class="hide-sm">Last report</th><th></th></tr></thead><tbody>
           ${items.map((u) => `<tr class="click" data-u="${u.id}">
-            <td><div style="display:flex;gap:8px;align-items:center"><div class="avatar sm">${esc(App.initials(u.name))}</div><div><div style="font-weight:500">${esc(u.name)}</div><div class="faint small">${u.role === 'admin' ? 'Admin' : u.role === 'subadmin' ? 'Sub admin' : esc(u.email)}</div></div></div></td>
+            <td><div style="display:flex;gap:8px;align-items:center"><div class="avatar sm">${esc(App.initials(u.name))}</div><div><div style="font-weight:500">${esc(u.name)}</div><div class="faint small">${u.role !== 'staff' ? esc(App.roleLabel(u.role)) : esc(u.email)}</div></div></div></td>
             <td class="hide-sm">${u.phone ? `<a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : ''}</td><td>${esc(u.location)}</td>
             <td class="hide-sm">${u.last_report ? esc(fmtDate(u.last_report)) : '<span class="faint">—</span>'}</td>
             <td><i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;

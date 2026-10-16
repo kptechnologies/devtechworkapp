@@ -422,7 +422,7 @@ function send_digests(array $rs): array
     }
     $log[] = "Admin digest: $count item(s), sent to $sent address(es)" . ($failed ? ", $failed failed" : '') . '.';
     $staffSent = 0;
-    foreach (q("SELECT id, name, email FROM users WHERE role IN ('staff','subadmin') AND active = 1")->fetchAll() as $s) {
+    foreach (q("SELECT id, name, email FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1")->fetchAll() as $s) {
         [$sSubject, $sHtml, $sCount] = build_staff_digest((int)$s['id']);
         if (!$sCount) {
             continue;

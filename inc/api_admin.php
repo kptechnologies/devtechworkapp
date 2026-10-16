@@ -56,7 +56,7 @@ function act_dashboard(array $in, array $me): void
             JOIN (SELECT location, MAX(id) AS id FROM reports WHERE report_date BETWEEN ? AND ? AND location <> '' GROUP BY location) x ON x.id = r.id
             ORDER BY r.laptops_faulty DESC", [$from, $to])->fetchAll();
 
-    $activeStaff = q("SELECT id, name FROM users WHERE role IN ('staff','subadmin') AND active = 1 ORDER BY name")->fetchAll();
+    $activeStaff = q("SELECT id, name FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1 ORDER BY name")->fetchAll();
     $reportedToday = array_map('intval', q('SELECT DISTINCT user_id FROM reports WHERE report_date = ?', [today()])->fetchAll(PDO::FETCH_COLUMN));
     $missing = array_values(array_filter($activeStaff, fn($s) => !in_array((int)$s['id'], $reportedToday, true)));
 
@@ -107,7 +107,7 @@ function act_dashboard(array $in, array $me): void
 
 function act_users_list(array $in, array $me): void
 {
-    require_manager();
+    require_management();
     $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.schools, u.active, u.last_login, u.created_at,
                u.password_hash IS NOT NULL AS has_password,
                (SELECT MAX(report_date) FROM reports r WHERE r.user_id = u.id) AS last_report,
@@ -127,13 +127,30 @@ function act_users_list(array $in, array $me): void
     json_out(['ok' => true, 'items' => $rows]);
 }
 
+/** Roles this person may give: admins give any; managers only roles below their own. */
+function assignable_roles(array $me): array
+{
+    return is_admin($me) ? array_keys(ROLE_LABELS) : ['staff', 'supervisor', 'subadmin'];
+}
+
 function act_user_save(array $in, array $me): void
 {
-    require_admin();
+    if (!can_manage_accounts($me)) {
+        fail('Only admins and managers can manage accounts.', 403);
+    }
     $id = (int)($in['id'] ?? 0);
     $name = str_in($in['name'] ?? '', 120);
     $email = strtolower(str_in($in['email'] ?? '', 190));
-    $role = in_array($in['role'] ?? '', ['admin', 'subadmin'], true) ? $in['role'] : 'staff';
+    $role = (string)($in['role'] ?? 'staff');
+    if (!isset(ROLE_LABELS[$role])) {
+        $role = 'staff';
+    }
+    if (!is_admin($me)) {
+        $target = $id ? q('SELECT role FROM users WHERE id = ?', [$id])->fetchColumn() : 'staff';
+        if (!in_array($target, assignable_roles($me), true) || !in_array($role, assignable_roles($me), true)) {
+            fail('Managers can only manage staff, supervisor and sub admin accounts.', 403);
+        }
+    }
     $active = !empty($in['active']) ? 1 : 0;
     $pass = (string)($in['password'] ?? '');
     $errors = [];
@@ -151,7 +168,7 @@ function act_user_save(array $in, array $me): void
     if (!$id && $pass === '') {
         $errors['password'] = 'Set a starting password.';
     }
-    if ($id === $me['id'] && ($role !== 'admin' || !$active)) {
+    if ($id === $me['id'] && is_admin($me) && ($role !== 'admin' || !$active)) {
         $errors['role'] = 'You can\'t remove your own admin access.';
     }
     if ($errors) {

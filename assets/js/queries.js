@@ -1,10 +1,10 @@
 /* DevTech Staff Portal — staff queries: written notes on non-performance, staff replies, outcomes and fines */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManager } = App;
+  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManagement, canIssueQueries } = App;
 
   const QSTATUS = {
-    open: ['Awaiting reply', 'out'], replied: ['Replied', 'info'], resolved: ['Resolved', 'in'], warning: ['Warning issued', 'bad'], withdrawn: ['Withdrawn', ''],
+    proposed: ['Proposed, not issued', 'info'], open: ['Awaiting reply', 'out'], replied: ['Replied', 'info'], resolved: ['Resolved', 'in'], warning: ['Warning issued', 'bad'], withdrawn: ['Withdrawn', ''],
   };
   const qPill = (x) => `<span class="pill ${QSTATUS[x.status]?.[1] || ''}">${esc(QSTATUS[x.status]?.[0] || x.status)}</span>${x.overdue ? ' <span class="pill bad">Overdue</span>' : ''}`;
   const qTone = (s) => ({ open: 'tone-out', replied: 'tone-info', resolved: 'tone-in', warning: 'tone-bad' }[s] || '');
@@ -29,7 +29,9 @@
     }
     const v = q || { query_date: App.cfg.today, category: 'other', reply_by: App.addDays(App.cfg.today, 2) };
     const who = q ? q.person : preset.name;
-    const el = App.modal(q ? `Edit ${esc(q.ref)}` : `Raise a query${who ? ' on ' + esc(who) : ''}`, `<form id="qf-form" novalidate>
+    const propose = !canIssueQueries();
+    const el = App.modal(q ? `Edit ${esc(q.ref)}` : `${propose ? 'Propose' : 'Raise'} a query${who ? ' on ' + esc(who) : ''}`, `<form id="qf-form" novalidate>
+      ${propose && !q ? '<div class="note-box" style="margin-bottom:12px">This is a proposal. Management reviews it and issues it to the staff member.</div>' : ''}
       ${fixed ? '' : `<div class="field"><label for="qf-who">Who is it for? <span class="req">*</span></label><select id="qf-who" name="person">
         <option value="">Choose…</option>${staff.length ? `<optgroup label="Staff">${staff.map((u) => `<option value="u:${u.id}">${esc(u.name)}</option>`).join('')}</optgroup>` : ''}
         ${contractors.length ? `<optgroup label="Contract staff">${contractors.map((c) => `<option value="c:${c.id}">${esc(c.name)}${c.trade ? ' · ' + esc(c.trade) : ''}</option>`).join('')}</optgroup>` : ''}</select></div>`}
@@ -41,7 +43,7 @@
         ${isAdmin() ? `<div class="field"><label for="qf-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qf-fine" name="fine" min="0" step="0.01" value="${esc(+v.fine ? v.fine : '')}" placeholder="0">
           <div class="help">Optional. For staff, it is deducted from payroll when you close the query, unless you withdraw it.</div></div>` : '<div></div>'}</div>
       <div class="field"><div class="label">Evidence (photos, documents)</div><div id="qf-files"></div></div></form>`,
-    `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="qf-ok"><i class="ti ti-send"></i>${q ? 'Save' : 'Issue query'}</button>`);
+    `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="qf-ok"><i class="ti ti-send"></i>${q ? 'Save' : propose ? 'Propose query' : 'Issue query'}</button>`);
     const up = App.uploader($('#qf-files', el), { existing: q?.attachments?.length || 0, label: 'Add evidence' });
     $('#qf-ok', el).addEventListener('click', async (e) => {
       const form = $('#qf-form', el);
@@ -68,7 +70,7 @@
     const el = App.drawer('Query', App.loading());
     let x;
     try { x = (await api('query_get', { query: { id } })).query; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isManager();
+    const admin = isManagement();
     const live = ['open', 'replied'].includes(x.status);
     const own = x.user_id == App.user.id;
     const canReply = live && (own || (isAdmin() && x.person_type === 'contractor'));
@@ -114,13 +116,32 @@
         } catch (err) { App.fail(err); }
       });
     }
-    if (!admin || !live) return;
+    if (!admin) return;
+    const issuer = canIssueQueries();
+    const proposed = x.status === 'proposed';
+    const canEdit = proposed ? issuer || +x.created_by === App.user.id : issuer && live;
+    const btns = [];
+    if (canEdit) btns.push('<button class="btn" id="qd-edit"><i class="ti ti-edit"></i>Edit</button>');
+    if (proposed && issuer) btns.push('<button class="btn danger" data-issue="discard"><i class="ti ti-trash"></i>Discard</button><button class="btn primary" data-issue="issue"><i class="ti ti-send"></i>Issue query</button>');
+    else if (issuer && live) btns.push('<button class="btn primary" id="qd-close"><i class="ti ti-gavel"></i>Close query</button>');
+    if (!btns.length) return;
     const foot = document.createElement('div');
     foot.className = 'drawer-foot';
-    foot.innerHTML = '<button class="btn" id="qd-edit"><i class="ti ti-edit"></i>Edit</button><button class="btn primary" id="qd-close"><i class="ti ti-gavel"></i>Close query</button>';
+    foot.innerHTML = btns.join('');
     el.appendChild(foot);
-    $('#qd-edit', el).addEventListener('click', () => { App.closeTop(); queryForm({}, x); });
-    $('#qd-close', el).addEventListener('click', () => closeQuery(x));
+    $('#qd-edit', el)?.addEventListener('click', () => { App.closeTop(); queryForm({}, x); });
+    $('#qd-close', el)?.addEventListener('click', () => closeQuery(x));
+    $$('[data-issue]', el).forEach((b) => b.addEventListener('click', async () => {
+      const issue = b.dataset.issue === 'issue';
+      const note = await App.confirm(issue ? 'Issue this query?' : 'Discard this proposal?',
+        issue ? `${esc(x.person)} is notified and asked to reply.` : `${esc(x.created_by_name || 'The supervisor')} is told it wasn't issued.`,
+        { ok: issue ? 'Issue query' : 'Discard', danger: !issue, input: issue ? null : { label: 'Reason (optional)' } });
+      if (note === null || note === false) return;
+      try {
+        await App.busy(b, () => api('query_issue', { data: { id: x.id, decision: issue ? 'issue' : 'discard', note: issue ? '' : note } }));
+        App.closeAll(); toast(issue ? 'Query issued' : 'Proposal discarded'); App.current?.refresh?.(); App.poll();
+      } catch (err) { App.fail(err); }
+    }));
   }
   App.openQuery = openQuery;
 
@@ -155,13 +176,13 @@
   /* --------------------------------------------------------------- pages */
   const qf = { status: 'pending', person_type: '', category: '' };
   async function queriesView(ctx) {
-    const admin = isManager();
+    const admin = isManagement();
     const load = async () => {
       const r = await api('queries_list', { query: admin ? qf : {} });
       const items = r.items;
       ctx.el.innerHTML = admin ? `
         <div class="page-head"><div><h1>Queries</h1><p class="muted">Written queries on non-performance by staff and contract staff. Staff reply in the portal. You record replies for contract staff.</p></div>
-          <div class="actions"><button class="btn primary" id="qs-new"><i class="ti ti-plus"></i>Raise a query</button></div></div>
+          <div class="actions"><button class="btn primary" id="qs-new"><i class="ti ti-plus"></i>${canIssueQueries() ? 'Raise a query' : 'Propose a query'}</button></div></div>
         <div class="filters" id="qs-f">
           <div class="seg">${[['pending', 'Open'], ['replied', 'Replied'], ['warning', 'Warnings'], ['', 'All']].map(([k, l]) => `<button type="button" data-s="${k}" class="${k === qf.status ? 'on' : ''}">${l}</button>`).join('')}</div>
           <select name="person_type">${App.opts([['staff', 'Staff'], ['contractor', 'Contract staff']], qf.person_type, { placeholder: 'Everyone' })}</select>

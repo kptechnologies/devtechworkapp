@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — wallet: home, expenses, payments, review, requests, balances, ledger */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, statusPill, catIcon, txnTone } = App;
+  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, canReviewMoney, statusPill, catIcon, txnTone } = App;
 
   const txnRow = (t, { showUser = false } = {}) => {
     const sign = t.kind === 'credit' ? 1 : t.kind === 'adjust' ? Math.sign(t.effect) : -1;
@@ -186,7 +186,8 @@
     const foot = document.createElement('div');
     foot.className = 'drawer-foot';
     const btns = [];
-    if (admin && t.kind === 'debit') {
+    // Admins and managers review expenses; nobody but an admin reviews their own.
+    if ((admin || (canReviewMoney() && !mine)) && t.kind === 'debit') {
       btns.push('<button class="btn danger" data-rv="rejected"><i class="ti ti-x"></i>Reject</button>');
       btns.push('<button class="btn" data-rv="queried"><i class="ti ti-help"></i>Query</button>');
       if (t.status !== 'approved') btns.push('<button class="btn primary" data-rv="approved"><i class="ti ti-check"></i>Approve</button>');
@@ -410,12 +411,12 @@
           <button class="btn sm danger hide" id="rv-reject"><i class="ti ti-x"></i>Reject selected</button></div>
         <div class="card">${items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th style="width:32px"><input type="checkbox" id="rv-all" aria-label="Select all"></th>
           <th>Date</th><th>Staff</th><th>Category</th><th class="hide-sm">What for</th><th class="r">Amount</th><th>Status</th><th class="hide-sm"></th><th></th></tr></thead><tbody>
-          ${items.map((t) => `<tr class="click" data-txn="${t.id}"><td><input type="checkbox" class="rv-c" value="${t.id}" aria-label="Select"></td>
+          ${items.map((t) => `<tr class="click" data-txn="${t.id}"><td>${isAdmin() || +t.user_id !== App.user.id ? `<input type="checkbox" class="rv-c" value="${t.id}" aria-label="Select">` : ''}</td>
             <td class="num">${esc(fmtDate(t.txn_date, false))}</td><td>${esc(t.user_name)}</td><td><i class="ti ti-${catIcon(t.category)} faint"></i> ${esc(t.category)}</td>
             <td class="ellipsis hide-sm">${esc(t.description)}${t.route ? ` <span class="faint">· ${esc(t.route)}</span>` : ''}</td>
             <td class="r num out" style="font-weight:600">${money(t.amount)}</td><td>${statusPill(t.status)}</td>
             <td class="faint hide-sm">${t.files ? `<i class="ti ti-paperclip"></i>${t.files}` : '<span class="small bad">No receipt</span>'}</td>
-            <td style="white-space:nowrap">${['posted', 'queried'].includes(t.status) ? `<button class="btn sm success" data-q="approved" title="Approve"><i class="ti ti-check"></i></button>
+            <td style="white-space:nowrap">${['posted', 'queried'].includes(t.status) && (isAdmin() || +t.user_id !== App.user.id) ? `<button class="btn sm success" data-q="approved" title="Approve"><i class="ti ti-check"></i></button>
               <button class="btn sm danger" data-q="rejected" title="Reject"><i class="ti ti-x"></i></button>` : ''}</td></tr>`).join('')}
           </tbody></table></div>` : App.empty('checks', status === 'review' ? 'All caught up' : 'Nothing here', status === 'review' ? 'No expenses are waiting for review.' : '')}</div>`;
       $$('#rv-seg button', ctx.el).forEach((b) => b.addEventListener('click', () => { status = b.dataset.s; load().catch(App.fail); }));
@@ -435,16 +436,16 @@
     };
     ctx.refresh = () => { if (!App.$$('.rv-c:checked').length) load().catch(() => {}); };
     await load();
-  }, { title: 'Expense review', admin: true, live: true });
+  }, { title: 'Expense review', can: canReviewMoney, live: true });
 
   /* --------------------------------------------------- funding requests */
   App.route('requests', async (ctx) => {
-    const admin = isAdmin();
+    const admin = canReviewMoney();
     const load = async () => {
       const r = await api('requests_list');
       ctx.el.innerHTML = `
         <div class="page-head"><div><h1>Funding requests</h1><p class="muted">${admin ? 'Approving a request sends the money to the staff member\'s wallet.' : 'Ask for money ahead of a job. Approved requests are added to your wallet.'}</p></div>
-          ${admin ? '' : '<div class="actions"><button class="btn primary" id="rq-new"><i class="ti ti-plus"></i>New request</button></div>'}</div>
+          ${isAdmin() ? '' : '<div class="actions"><button class="btn primary" id="rq-new"><i class="ti ti-plus"></i>New request</button></div>'}</div>
         <div class="card">${r.items.length ? `<ul class="list">${r.items.map((x) => `<li class="li" style="cursor:default;align-items:flex-start">
           <div class="li-icon ${x.status === 'approved' ? 'tone-in' : x.status === 'pending' ? 'tone-out' : 'tone-bad'}"><i class="ti ti-cash"></i></div>
           <div class="main-col"><div class="t">${money(x.amount)}${admin ? ` · ${esc(x.user_name)}` : ''}</div>
@@ -453,8 +454,8 @@
             ${x.admin_note ? `<div class="note-box" style="margin-top:6px">${esc(x.admin_note)}</div>` : ''}
             ${x.attachments.length ? `<div style="margin-top:8px" class="rq-g">${App.gallery(x.attachments)}</div>` : ''}</div>
           <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">${statusPill(x.status)}
-            ${x.status === 'pending' && admin ? `<button class="btn sm primary" data-ap="${x.id}" data-amt="${x.amount}"><i class="ti ti-check"></i>Approve</button><button class="btn sm danger" data-dc="${x.id}">Decline</button>` : ''}
-            ${x.status === 'pending' && !admin ? `<button class="btn sm ghost" data-cn="${x.id}">Cancel</button>` : ''}
+            ${x.status === 'pending' && admin && (isAdmin() || +x.user_id !== App.user.id) ? `<button class="btn sm primary" data-ap="${x.id}" data-amt="${x.amount}"><i class="ti ti-check"></i>Approve</button><button class="btn sm danger" data-dc="${x.id}">Decline</button>` : ''}
+            ${x.status === 'pending' && +x.user_id === App.user.id ? `<button class="btn sm ghost" data-cn="${x.id}">Cancel</button>` : ''}
             ${x.txn_id ? `<a class="small" href="#/txn/${x.txn_id}">View payment</a>` : ''}</div></li>`).join('')}</ul>`
           : App.empty('cash-off', 'No funding requests', admin ? 'Requests from staff will show up here.' : 'Need money for a job? Send a request.')}</div>`;
       $$('.rq-g', ctx.el).forEach((g) => App.bindGallery(g));

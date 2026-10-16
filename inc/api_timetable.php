@@ -13,7 +13,7 @@ const TT_PLAN_POSTED = "('submitted','approved','returned')";
 /** Schools a person can see timetables for: their own, or every school for admins. */
 function tt_schools(array $me): array
 {
-    if (is_manager($me)) {
+    if (is_management($me)) {
         return array_values(array_filter(location_options(), fn($n) => !is_office_location($n)));
     }
     return array_values(array_filter(array_map('lesson_school', $me['schools']), fn($n) => $n !== ''));
@@ -39,7 +39,7 @@ function tt_load_slot(int $id, array $me): array
 /** Staff can change only the periods they teach; admins any. */
 function tt_can_edit(array $slot, array $me): bool
 {
-    return is_manager($me) || (int)$slot['teacher_id'] === $me['id'];
+    return is_management($me) || (int)$slot['teacher_id'] === $me['id'];
 }
 
 function tt_slot_row(array $s, array $me): array
@@ -132,7 +132,7 @@ function act_timetable_get(array $in, array $me): void
         $slots = $school === '' ? [] : tt_slots('LOWER(t.school) = LOWER(?)', [$school], $me);
     }
     $teachers = [];
-    if (is_manager($me) && $school !== '') {
+    if (is_management($me) && $school !== '') {
         foreach (q("SELECT id, name, schools, location FROM users WHERE active = 1 ORDER BY name")->fetchAll() as $u) {
             $teachers[] = ['id' => (int)$u['id'], 'name' => $u['name'],
                 'here' => in_array(mb_strtolower($school), array_map('mb_strtolower', user_schools($u)), true)];
@@ -149,7 +149,7 @@ function act_timetable_slot_save(array $in, array $me): void
     if ($old && !$old['can_edit']) {
         fail('Only the teacher of this period or an admin can change it.', 403);
     }
-    $admin = is_manager($me);
+    $admin = is_management($me);
     $v = [
         'school' => lesson_school((string)($in['school'] ?? '')),
         'day' => (int)($in['day'] ?? 0),

@@ -50,9 +50,16 @@
   };
   const initials = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
   const isAdmin = () => App.user?.role === 'admin';
-  const isSubAdmin = () => App.user?.role === 'subadmin';
-  // Admins and sub admins run the day-to-day work; money stays with isAdmin().
-  const isManager = () => isAdmin() || isSubAdmin();
+  const hasRole = (...roles) => roles.includes(App.user?.role);
+  const isSubAdmin = () => hasRole('subadmin');
+  // Management runs the day-to-day work; money stays with isAdmin(), apart from what managers may review.
+  const isManagement = () => hasRole('admin', 'manager', 'subadmin', 'supervisor');
+  const canApproveTime = () => hasRole('admin', 'manager');
+  const canReviewMoney = () => hasRole('admin', 'manager');
+  const canManageAccounts = () => hasRole('admin', 'manager');
+  const canIssueQueries = () => hasRole('admin', 'manager', 'subadmin');
+  const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', subadmin: 'Sub admin', supervisor: 'Supervisor', staff: 'Staff' };
+  const roleLabel = (r) => ROLE_LABELS[r] || 'Staff';
   const addDays = (iso, n) => { const d = parseDate(iso); d.setDate(d.getDate() + n); return iso8601(d); };
   const iso8601 = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -77,7 +84,7 @@
   const catIcon = (c) => (CAT_ICONS.find(([re]) => re.test(c || '')) || [0, 'receipt'])[1];
   const txnTone = (t) => (t.kind === 'credit' ? 'tone-in' : t.kind === 'adjust' ? 'tone-info' : t.status === 'rejected' ? 'tone-bad' : 'tone-out');
 
-  Object.assign(App, { $, $$, esc, money, moneyShort, fmtDate, fmtDateTime, ago, initials, isAdmin, isSubAdmin, isManager, addDays, iso8601, parseDate, debounce, store, statusPill, catIcon, txnTone, STATUS });
+  Object.assign(App, { $, $$, esc, money, moneyShort, fmtDate, fmtDateTime, ago, initials, isAdmin, isSubAdmin, isManagement, canApproveTime, canReviewMoney, canManageAccounts, canIssueQueries, roleLabel, ROLE_LABELS, addDays, iso8601, parseDate, debounce, store, statusPill, catIcon, txnTone, STATUS });
 
   /* ---------------------------------------------------------------- API */
   async function api(action, { data = null, files = null, query = null, method = null, retry = true } = {}) {
@@ -444,25 +451,31 @@
         { href: 'profile', icon: 'user', text: 'Profile', mobileOnly: true },
       ];
     }
-    if (isSubAdmin()) {
+    if (isManagement()) {
+      // Manager, sub admin and supervisor share one menu; managers also review money and run accounts.
+      const money = canReviewMoney() ? [
+        { href: 'review', icon: 'receipt', text: 'Expense review', badge: 'review' },
+        { href: 'requests', icon: 'cash', text: 'Funding requests', badge: 'requests' },
+      ] : [];
       return [
         { label: 'Manage' },
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'memos', icon: 'mail', text: 'Memos', badge: 'memos', mobile: true },
+        ...money,
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports' },
         { href: 'issues', icon: 'layout-kanban', text: 'Issues board' },
         { href: 'lessons', icon: 'school', text: 'Lessons', badge: 'lessons' },
         { href: 'timetable', icon: 'calendar-time', text: 'Timetables' },
         { href: 'attendance', icon: 'clock-check', text: 'Attendance' },
         { href: 'queries', icon: 'alert-triangle', text: 'Queries', badge: 'queries' },
-        { href: 'staff', icon: 'users', text: 'Staff' },
+        { href: 'staff', icon: 'users', text: canManageAccounts() ? 'Staff setup' : 'Staff' },
         { href: 'tools', icon: 'tools', text: 'Work tools' },
         { label: 'My work' },
         { href: '', icon: 'home', text: 'Home', mobile: true },
         { href: 'wallet', icon: 'wallet', text: 'Wallet' },
         { href: 'report/new', icon: 'clipboard-plus', text: 'New report', mobile: true },
         { href: 'my-pay', icon: 'calendar-stats', text: 'My record' },
-        { href: 'requests', icon: 'cash', text: 'Funding requests' },
+        ...(canReviewMoney() ? [] : [{ href: 'requests', icon: 'cash', text: 'Funding requests' }]),
         { href: 'profile', icon: 'user', text: 'Profile', mobile: true },
       ];
     }
@@ -494,7 +507,7 @@
             : `<a href="#/${i.href}" data-nav="${i.href}"><i class="ti ti-${i.icon}"></i>${esc(i.text)}${i.badge ? `<span class="badge hide" data-badge="${i.badge}"></span>` : ''}</a>`).join('')}</nav>
           <div class="sidebar-foot">
             <a href="#/profile" class="li" style="padding:8px;border:0;border-radius:10px;text-decoration:none;color:inherit">
-              <div class="avatar sm">${esc(initials(u.name))}</div><div class="main-col"><div class="t">${esc(u.name)}</div><div class="s">${esc(u.role === 'admin' ? 'Administrator' : u.role === 'subadmin' ? 'Sub admin' : u.location || 'Staff')}</div></div></a>
+              <div class="avatar sm">${esc(initials(u.name))}</div><div class="main-col"><div class="t">${esc(u.name)}</div><div class="s">${esc(u.role === 'admin' ? 'Administrator' : u.role !== 'staff' ? roleLabel(u.role) : u.location || 'Staff')}</div></div></a>
           </div>
         </aside>
         <div class="main">
@@ -622,7 +635,8 @@
     let match = null;
     for (const r of routes) {
       if (r.opts.admin !== undefined && r.opts.admin !== isAdmin()) continue;
-      if (r.opts.manager && !isManager()) continue;
+      if (r.opts.manager && !isManagement()) continue;
+      if (r.opts.can && !r.opts.can()) continue;
       const m = path.match(r.re);
       if (m) { match = { r, params: m.groups || {} }; break; }
     }

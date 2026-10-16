@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — lesson delivery evidence: lesson plans with prep proof, classes taught with photos, review and compliance */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, ago, isManager } = App;
+  const { $, $$, esc, api, toast, fmtDate, ago, isManagement } = App;
 
   const STATUS = { assigned: ['To prepare', 'out'], submitted: ['Waiting for review', 'info'], approved: ['Approved', 'in'], returned: ['Returned to fix', 'bad'], cancelled: ['Did not hold', ''] };
   const pill = (s) => `<span class="pill ${STATUS[s]?.[1] || ''}">${esc(STATUS[s]?.[0] || s)}</span>`;
@@ -219,7 +219,7 @@
     const el = App.drawer('Lesson', App.loading());
     let p;
     try { p = (await api('lesson_plan_get', { query: { id } })).plan; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isManager();
+    const admin = isManagement();
     const own = p.user_id === App.user.id;
     $('.drawer-head h2', el).textContent = `${p.ref} · ${p.topic}`;
     $('.drawer-body', el).innerHTML = `
@@ -509,7 +509,7 @@
     const el = App.drawer('Training', App.loading());
     let t;
     try { t = (await api('training_get', { query: { id } })).training; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isManager();
+    const admin = isManagement();
     const mine = t.assignees.find((a) => a.user_id === App.user.id);
     $('.drawer-head h2', el).textContent = t.title;
     const proof = (a) => `${a.proof_note ? `<div class="qa"><div class="q">What they did</div><div class="a" style="white-space:pre-wrap">${esc(a.proof_note)}</div></div>` : ''}
@@ -575,13 +575,13 @@
   /* --------------------------------------------------------------- lists */
   const planList = (plans) => (plans.length ? `<ul class="list">${plans.map((p) => `<li class="li" data-plan="${p.id}">
       ${p.thumb ? `<img class="li-thumb" src="file.php?id=${p.thumb}&thumb=1" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:8px">` : '<div class="li-icon tone-brand"><i class="ti ti-school"></i></div>'}
-      <div class="main-col"><div class="t">${isManager() ? `${esc(p.user_name)} · ` : ''}${esc(p.topic)}</div>
+      <div class="main-col"><div class="t">${isManagement() ? `${esc(p.user_name)} · ` : ''}${esc(p.topic)}</div>
       <div class="s">${esc(p.ref)} · ${esc(p.subject)} · ${esc(p.school)} · ${p.classes} class${p.classes === 1 ? '' : 'es'} · ${esc(fmtDate(p.submitted_at, false))}</div></div>${pill(p.status)}</li>`).join('')}</ul>`
     : App.empty('school', 'No lesson plans', 'Lesson plans show up here once submitted.'));
 
-  const sessionTable = (items) => (items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date</th>${isManager() ? '<th>Staff</th>' : ''}<th>School / class</th><th>Topic</th>
+  const sessionTable = (items) => (items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date</th>${isManagement() ? '<th>Staff</th>' : ''}<th>School / class</th><th>Topic</th>
       <th class="r">Pupils</th><th>Photos</th><th>Status</th></tr></thead><tbody>${items.map((s) => `<tr class="click" data-plan="${s.plan_id}">
-      <td class="num">${esc(fmtDate(s.session_date, false))}</td>${isManager() ? `<td>${esc(s.user_name)}</td>` : ''}
+      <td class="num">${esc(fmtDate(s.session_date, false))}</td>${isManagement() ? `<td>${esc(s.user_name)}</td>` : ''}
       <td><div style="font-weight:500">${esc(s.class_name)}</div><div class="faint small">${esc(s.school)}</div></td>
       <td><div>${esc(s.topic)}</div><div class="faint small">${esc(s.subject)} · ${esc(s.project_title)}</div></td>
       <td class="r num">${s.status === 'cancelled' ? '—' : `${s.students_completed ?? 0}/${s.students_present ?? 0}`}</td>
@@ -619,7 +619,7 @@
   /* --------------------------------------------------------------- page */
   const st = { tab: 'review', from: '', to: '', user_id: '', school: '', subject: '', status: '', flag: '' };
   async function lessonsView(ctx) {
-    const admin = isManager();
+    const admin = isManagement();
     const t = App.cfg.today;
     if (!st.from) { st.from = App.addDays(t, -30); st.to = t; }
     if (!admin && !['mine', 'scheme', 'training', 'classes', 'stats'].includes(st.tab)) st.tab = 'mine';

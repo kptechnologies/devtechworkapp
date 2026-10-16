@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — staff profiles, work tools register, attendance (clock in/out with GPS + selfie) */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManager } = App;
+  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManagement } = App;
 
   const timeOf = (dt) => (dt ? new Date(dt.replace(' ', 'T')).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }) : '');
   const hrs = (min) => (min === null || min === undefined ? '' : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`);
@@ -379,7 +379,7 @@
   const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 
   App.route('attendance', async (ctx) => {
-    const admin = isManager();
+    const admin = isManagement();
     const staff = admin ? (await api('users_list')).items.filter((u) => u.active) : [];
     const t = App.cfg.today;
     let tab = App.store.get('dt-attab', admin ? 'register' : 'report');
@@ -701,10 +701,10 @@
         <div class="card card-pad profile-head" style="margin-bottom:14px">
           ${admin || self ? `<label class="avatar-edit" title="Change photo">${App.avatar(u, 'xl')}<input type="file" accept="image/*" class="sr" id="pf-photo"><span><i class="ti ti-camera"></i></span></label>` : App.avatar(u, 'xl')}
           <div class="main-col" style="min-width:0;flex:1"><h1 style="margin-bottom:2px">${esc(u.name)}</h1>
-            <div class="muted">${[u.job_title, u.role === 'admin' ? 'Administrator' : u.role === 'subadmin' ? 'Sub admin' : '', u.location].filter(Boolean).map(esc).join(' · ') || 'Staff'}</div>
+            <div class="muted">${[u.job_title, u.role === 'admin' ? 'Administrator' : u.role !== 'staff' ? App.roleLabel(u.role) : '', u.location].filter(Boolean).map(esc).join(' · ') || 'Staff'}</div>
             <div class="small muted" style="margin-top:4px">${esc(u.email)}${u.phone ? ` · <a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : ''}</div>
             ${u.duties.length ? `<div class="chips" style="margin-top:8px">${u.duties.map((d) => `<span class="pill brand">${esc(d)}</span>`).join('')}</div>` : ''}</div>
-          <div class="actions">${admin && !self ? `<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button><a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
+          <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
             ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}</div>
         </div>
         <div class="grid g4" style="margin-bottom:14px">
@@ -746,9 +746,13 @@
       <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s)}</span></label>`).join('')}</div><div class="help">Tick every school they work at. Add new schools under Clients.</div></div>`;
   };
 
+  /** A manager may edit the work details of staff, supervisors and sub admins (never pay or bank details). */
+  const managerEdits = (u, self) => !App.isAdmin() && !self && App.canManageAccounts() && ['staff', 'supervisor', 'subadmin'].includes(u.role);
+
   function tabHtml(tab, p, admin, self) {
     const u = p.user;
-    if (tab === 'details' && !admin && !self) {
+    const mgr = managerEdits(u, self);
+    if (tab === 'details' && !admin && !self && !mgr) {
       // Sub admin looking at someone else: contact and work details, read only.
       const row = (label, val) => (val ? `<div style="margin-bottom:10px"><div class="muted small">${label}</div><div>${esc(val)}</div></div>` : '');
       return `<div class="card card-pad"><h3 style="margin-bottom:14px">Details</h3>
@@ -761,16 +765,16 @@
       const f = (name, label, val, attrs = '') => `<div class="field"><label for="pd-${name}">${label}</label><input id="pd-${name}" name="${name}" value="${esc(val || '')}" ${attrs}></div>`;
       return `<div class="grid g2">
         <form class="card card-pad" id="pd-form"><h3 style="margin-bottom:14px">Personal details</h3>
-          ${admin ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
-            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>
-            <div class="field"><label for="pd-salary">Monthly salary (${esc(App.cfg.currency)})</label><input type="number" id="pd-salary" name="salary" min="0" step="0.01" value="${esc(+u.salary ? u.salary : '')}" style="max-width:220px">
+          ${admin || mgr ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
+            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>` : ''}
+          ${admin ? `<div class="field"><label for="pd-salary">Monthly salary (${esc(App.cfg.currency)})</label><input type="number" id="pd-salary" name="salary" min="0" step="0.01" value="${esc(+u.salary ? u.salary : '')}" style="max-width:220px">
               <div class="help">Payroll deducts attendance charges from this. See <a href="#/payroll">Payroll</a>.</div></div>` : ''}
           ${f('phone', 'Phone', u.phone, 'type="tel"')}
           ${App.schoolsField(u.schools)}
           ${f('address', 'Home address', u.address)}
           <div class="form-row">${f('next_of_kin', 'Next of kin', u.next_of_kin)}${f('next_of_kin_phone', 'Next of kin phone', u.next_of_kin_phone, 'type="tel"')}</div>
-          <div class="form-row">${f('bank_name', 'Bank', u.bank_name)}${f('bank_account', 'Account number', u.bank_account, 'inputmode="numeric"')}</div>
-          ${admin ? `<div class="field"><div class="label">Responsibilities</div><div class="opts">${App.cfg.duties.map((d) => `<label class="opt"><input type="checkbox" data-multi="1" name="duties" value="${esc(d)}" ${u.duties.includes(d) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(d)}</span></label>`).join('')}</div>
+          ${mgr ? '' : `<div class="form-row">${f('bank_name', 'Bank', u.bank_name)}${f('bank_account', 'Account number', u.bank_account, 'inputmode="numeric"')}</div>`}
+          ${admin || mgr ? `<div class="field"><div class="label">Responsibilities</div><div class="opts">${App.cfg.duties.map((d) => `<label class="opt"><input type="checkbox" data-multi="1" name="duties" value="${esc(d)}" ${u.duties.includes(d) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(d)}</span></label>`).join('')}</div>
             <div class="help">Pre-ticked on their daily report so they only see the questions for their kind of work.</div></div>` : u.duties.length ? '' : ''}
           <button class="btn primary" type="submit">Save details</button></form>
         ${self ? `<div class="stack"><form class="card card-pad" id="pw-form" novalidate><h3 style="margin-bottom:14px">Change password</h3>
@@ -782,14 +786,14 @@
       </div>`;
     }
     if (tab === 'tools') {
-      return `<div class="card"><div class="card-head"><h3>Tools held</h3>${isManager() ? '<button class="btn sm primary" id="pt-issue"><i class="ti ti-arrow-up-right"></i>Issue a tool</button>' : ''}</div>
+      return `<div class="card"><div class="card-head"><h3>Tools held</h3>${isManagement() ? '<button class="btn sm primary" id="pt-issue"><i class="ti ti-arrow-up-right"></i>Issue a tool</button>' : ''}</div>
         ${p.tools.length ? `<ul class="list">${p.tools.map((t) => `<li class="li" data-tool="${t.id}"><div class="li-icon tone-brand"><i class="ti ti-tools"></i></div>
           <div class="main-col"><div class="t">${esc(t.name)}</div><div class="s">${[t.category, t.tag_code, t.serial_no].filter(Boolean).map(esc).join(' · ')} · since ${esc(fmtDate(t.issued_at, false))}</div></div>${condPill(t.condition)}</li>`).join('')}</ul>`
-          : App.empty('tools', 'No tools issued', isManager() ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here.')}</div>`;
+          : App.empty('tools', 'No tools issued', isManagement() ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here.')}</div>`;
     }
     if (tab === 'attendance') {
       return `<div class="card card-pad" style="margin-bottom:14px"><h3 style="margin-bottom:10px">This month</h3><div id="pt-cal">${App.loading()}</div></div>
-        <div class="card"><div class="card-head"><h3>Recent clock-ins</h3>${isManager() ? `<a class="small" href="#/attendance">Attendance register</a>` : ''}</div>
+        <div class="card"><div class="card-head"><h3>Recent clock-ins</h3>${isManagement() ? `<a class="small" href="#/attendance">Attendance register</a>` : ''}</div>
         ${p.attendance.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Where</th></tr></thead><tbody>
           ${p.attendance.map((x) => `<tr><td class="num">${esc(fmtDate(x.work_date, false))}</td><td class="num">${esc(timeOf(x.in_at))} ${x.late ? '<span class="pill out">Late</span>' : ''}</td>
             <td class="num">${x.out_at ? esc(timeOf(x.out_at)) : '<span class="pill info">On site</span>'}</td><td class="r num">${hrs(x.minutes)}</td>
@@ -812,7 +816,7 @@
     if (tab === 'queries') {
       const warnings = p.queries.filter((x) => x.status === 'warning').length;
       return `<div class="card"><div class="card-head"><h3>Queries${warnings ? ` <span class="pill bad">${warnings} warning${warnings === 1 ? '' : 's'}</span>` : ''}</h3>
-        ${isManager() && !self ? '<button class="btn sm primary" id="pq-new"><i class="ti ti-alert-triangle"></i>Raise a query</button>' : ''}</div>${App.queryList(p.queries)}</div>`;
+        ${isManagement() && !self ? `<button class="btn sm primary" id="pq-new"><i class="ti ti-alert-triangle"></i>${App.canIssueQueries() ? 'Raise' : 'Propose'} a query</button>` : ''}</div>${App.queryList(p.queries)}</div>`;
     }
     const w = p.wallet;
     return `<div class="card card-pad"><div class="grid g3">
@@ -828,7 +832,7 @@
         e.preventDefault();
         const d = App.formData(e.target);
         d.id = p.user.id;
-        if (admin && !d.duties) d.duties = [];
+        if ((admin || managerEdits(p.user, self)) && !d.duties) d.duties = [];
         try {
           const r = await App.busy(e.submitter, () => api('staff_profile_save', { data: d }));
           if (self) App.user = { ...App.user, phone: r.user.phone, location: r.user.location, schools: r.user.schools, duties: r.user.duties, job_title: r.user.job_title };
@@ -850,7 +854,7 @@
     }
     if (tab === 'tools') {
       $$('[data-tool]', body).forEach((li) => li.addEventListener('click', async () => {
-        if (!isManager()) return;
+        if (!isManagement()) return;
         const staff = (await api('users_list')).items.filter((u) => u.active);
         openTool(+li.dataset.tool, staff, reload);
       }));
