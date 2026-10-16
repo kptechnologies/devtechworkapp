@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -540,6 +540,37 @@ function table_sql(): array
             KEY idx_job (job_id, status),
             KEY idx_user (user_id, status)
         ) $t",
+        // v13: memos, staff notes to management, and sub admin requests to the admin
+        "CREATE TABLE IF NOT EXISTS memos (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            sender_id INT UNSIGNED NOT NULL,
+            kind VARCHAR(10) NOT NULL DEFAULT 'memo',
+            subject VARCHAR(190) NOT NULL,
+            body TEXT NOT NULL,
+            audience VARCHAR(12) NOT NULL DEFAULT 'management',
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            decided_by INT UNSIGNED NULL,
+            decided_at DATETIME NULL,
+            decision_note VARCHAR(1000) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            KEY idx_sender (sender_id),
+            KEY idx_kind (kind, status)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS memo_recipients (
+            memo_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            read_at DATETIME NULL,
+            PRIMARY KEY (memo_id, user_id),
+            KEY idx_user (user_id, read_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS memo_replies (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            memo_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            body TEXT NOT NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_memo (memo_id)
+        ) $t",
     ];
 }
 
@@ -591,6 +622,11 @@ function column_sql(): array
         // v12: a lesson plan posted for a class on the timetable
         ['lesson_plans', 'class_name', "VARCHAR(120) NOT NULL DEFAULT ''"],
         ['lesson_plans', 'slot_id', 'INT UNSIGNED NULL'],
+        // v13: a sub admin recommends a decision on a request for more time; only the admin decides
+        ['job_extensions', 'recommended_by', 'INT UNSIGNED NULL'],
+        ['job_extensions', 'recommendation', "VARCHAR(10) NOT NULL DEFAULT ''"],
+        ['job_extensions', 'recommend_note', "VARCHAR(500) NOT NULL DEFAULT ''"],
+        ['job_extensions', 'recommended_at', 'DATETIME NULL'],
     ];
 }
 

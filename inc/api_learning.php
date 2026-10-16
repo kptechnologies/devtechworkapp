@@ -18,7 +18,7 @@ function staff_at_school(string $school): array
 {
     $out = [];
     foreach (client_staff($school) as $id => $u) {
-        if ($u['active'] && $u['role'] === 'staff') {
+        if ($u['active'] && in_array($u['role'], EMPLOYEE_ROLES, true)) {
             $out[$id] = $u['name'];
         }
     }
@@ -33,7 +33,7 @@ function active_staff(array $ids): array
         return [];
     }
     $in = implode(',', array_fill(0, count($ids), '?'));
-    return q("SELECT id, name FROM users WHERE active = 1 AND role = 'staff' AND id IN ($in) ORDER BY name", $ids)->fetchAll(PDO::FETCH_KEY_PAIR);
+    return q("SELECT id, name FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') AND id IN ($in) ORDER BY name", $ids)->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
 /** Recipients from a form: send_to 'school' (staff assigned there), 'all' (every active staff member) or 'staff' (user_ids). */
@@ -41,7 +41,7 @@ function learning_recipients(array $in, string $school): array
 {
     return match ((string)($in['send_to'] ?? 'staff')) {
         'school' => $school !== '' ? staff_at_school($school) : [],
-        'all' => q("SELECT id, name FROM users WHERE active = 1 AND role = 'staff' ORDER BY name")->fetchAll(PDO::FETCH_KEY_PAIR),
+        'all' => q("SELECT id, name FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') ORDER BY name")->fetchAll(PDO::FETCH_KEY_PAIR),
         default => active_staff((array)($in['user_ids'] ?? [])),
     };
 }
@@ -51,7 +51,7 @@ function learning_recipients(array $in, string $school): array
 /** Admin posts a lesson brief; each recipient gets a plan to prepare. */
 function act_lesson_assign(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $sendTo = ($in['send_to'] ?? '') === 'school' ? 'school' : 'staff';
     $school = lesson_school((string)($in['school'] ?? ''));
     $subject = in_array($in['subject'] ?? '', lesson_subjects(), true) ? $in['subject'] : '';
@@ -129,7 +129,7 @@ function act_lesson_assign(array $in, array $me): void
 /** Posted lessons with each recipient's progress. */
 function act_lesson_assignments_list(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     [$from, $to] = report_range($in + ['from' => date('Y-m-d', strtotime('-60 days')), 'to' => date('Y-m-d', strtotime('+60 days'))]);
     $w = ["a.status = 'open'", '(a.planned_date BETWEEN ? AND ? OR DATE(a.created_at) BETWEEN ? AND ?)'];
     $p = [$from, $to, $from, $to];
@@ -166,7 +166,7 @@ function act_lesson_assignments_list(array $in, array $me): void
 /** Take back a posted lesson: copies nobody has prepared yet are removed; prepared or taught ones stay. */
 function act_lesson_assign_withdraw(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $a = q('SELECT * FROM lesson_assignments WHERE id = ?', [(int)($in['id'] ?? 0)])->fetch();
     if (!$a) {
         fail('Posted lesson not found.', 404);
@@ -203,7 +203,7 @@ function schemes_load(array $me, string $school = '', int $id = 0): array
         $w[] = 's.school = ?';
         $p[] = $school;
     }
-    if (!is_admin($me)) {
+    if (!is_management($me)) {
         $mine = $me['schools'] ?: [''];
         $w[] = 's.school IN (' . implode(',', array_fill(0, count($mine), '?')) . ')';
         array_push($p, ...$mine);
@@ -258,7 +258,7 @@ function act_schemes_list(array $in, array $me): void
 /** Create or edit a scheme with its weekly topics. Weeks that are taught keep their id so coverage stays linked. */
 function act_scheme_save(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $id = (int)($in['id'] ?? 0);
     if ($id && !q('SELECT id FROM lesson_schemes WHERE id = ?', [$id])->fetchColumn()) {
         fail('Scheme not found.', 404);
@@ -340,7 +340,7 @@ function act_scheme_save(array $in, array $me): void
 
 function act_scheme_delete(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $id = (int)($in['id'] ?? 0);
     if ((int)q('SELECT COUNT(*) FROM lesson_plans p JOIN lesson_scheme_items i ON i.id = p.scheme_item_id WHERE i.scheme_id = ?', [$id])->fetchColumn()) {
         fail('Lessons have been planned or taught from this scheme, so it can\'t be deleted.');
@@ -376,7 +376,7 @@ function act_scheme_weeks(array $in, array $me): void
 
 function training_badge(array $me): int
 {
-    if (is_admin($me)) {
+    if (is_management($me)) {
         return (int)q("SELECT COUNT(*) FROM training_assignees ta JOIN trainings t ON t.id = ta.training_id WHERE ta.status = 'submitted' AND t.status = 'open'")->fetchColumn();
     }
     return (int)q("SELECT COUNT(*) FROM training_assignees ta JOIN trainings t ON t.id = ta.training_id
@@ -386,7 +386,7 @@ function training_badge(array $me): int
 /** Create or edit a training item; new recipients are added, nobody is removed. */
 function act_training_save(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $id = (int)($in['id'] ?? 0);
     $old = $id ? q('SELECT * FROM trainings WHERE id = ?', [$id])->fetch() : null;
     if ($id && !$old) {
@@ -437,7 +437,7 @@ function act_training_save(array $in, array $me): void
 
 function act_trainings_list(array $in, array $me): void
 {
-    if (is_admin($me)) {
+    if (is_management($me)) {
         $closed = !empty($in['closed']);
         $rows = q("SELECT t.*, u.name AS created_by_name, COUNT(ta.id) AS assignees, SUM(ta.status = 'done') AS done, SUM(ta.status = 'submitted') AS submitted,
             SUM(ta.status = 'returned') AS returned, SUM(ta.status = 'todo') AS todo
@@ -467,10 +467,10 @@ function load_training(int $id, array $me): array
         fail('Training not found.', 404);
     }
     $t['id'] = (int)$t['id'];
-    $w = is_admin($me) ? '' : ' AND ta.user_id = ' . (int)$me['id'];
+    $w = is_management($me) ? '' : ' AND ta.user_id = ' . (int)$me['id'];
     $t['assignees'] = q("SELECT ta.*, u.name AS user_name, rb.name AS reviewed_by_name FROM training_assignees ta JOIN users u ON u.id = ta.user_id
         LEFT JOIN users rb ON rb.id = ta.reviewed_by WHERE ta.training_id = ?$w ORDER BY u.name", [$id])->fetchAll();
-    if (!is_admin($me) && !$t['assignees']) {
+    if (!is_management($me) && !$t['assignees']) {
         fail('This training wasn\'t given to you.', 403);
     }
     $proof = attachments_for('trainproof', array_column($t['assignees'], 'id'));
@@ -521,14 +521,14 @@ function act_training_submit(array $in, array $me): void
     save_uploads('trainproof', $a['id'], $me['id'], 'proof');
     audit('training_submit', 'training', $t['id'], ['was' => $a['status']]);
     touch_change();
-    notify_admins('training', $me['name'] . ' finished training: ' . $t['title'], mb_substr($note, 0, 200), 'lessons/training/' . $t['id'], false);
+    notify_managers('training', $me['name'] . ' finished training: ' . $t['title'], mb_substr($note, 0, 200), 'lessons/training/' . $t['id'], false);
     json_out(['ok' => true]);
 }
 
 /** Admin marks a staff member's training done, or returns it with a note. */
 function act_training_review(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $a = q('SELECT ta.*, t.title FROM training_assignees ta JOIN trainings t ON t.id = ta.training_id WHERE ta.id = ?', [(int)($in['assignee_id'] ?? 0)])->fetch();
     if (!$a) {
         fail('Not found.', 404);
@@ -549,7 +549,7 @@ function act_training_review(array $in, array $me): void
 /** Close (or reopen) a training item; closed items leave staff to-do lists. */
 function act_training_close(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $id = (int)($in['id'] ?? 0);
     $status = !empty($in['reopen']) ? 'open' : 'closed';
     q('UPDATE trainings SET status = ? WHERE id = ?', [$status, $id]);

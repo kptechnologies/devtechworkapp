@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — job orders: list, detail with timeline, assign, complete with photos, verify */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, ago, isAdmin } = App;
+  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, ago, isAdmin, isManagement, canApproveTime } = App;
 
   const JOB_STATUS = {
     requested: ['Requested', 'info'], open: ['Open', 'brand'], in_progress: ['In progress', 'out'], awaiting_check: ['Awaiting check', 'out'],
@@ -97,7 +97,7 @@
   App.route('jobs/:id', async (ctx) => { await jobsList(ctx); openJob(+ctx.params.id); }, { title: 'Job orders', nav: 'jobs', live: true });
 
   async function jobsList(ctx) {
-    const admin = isAdmin();
+    const admin = isManagement();
     App.setTitle(admin ? 'Job orders' : 'My jobs');
     const tabs = admin ? TABS_ADMIN : TABS_STAFF;
     const staff = admin ? await activeStaff() : [];
@@ -185,13 +185,32 @@
     } catch (err) { App.fail(err); }
   };
 
-  /** A pending request for more time, with Approve / Refuse for admins. */
-  const extBox = (x, admin) => `<div class="ext-box" data-ext="${x.id}"><div class="small"><i class="ti ti-clock-plus"></i> <b>${esc(x.user_name)}</b> asked for more time,
+  /** A pending request for more time: Approve / Refuse for admins and managers, Recommend for sub admins and supervisors. */
+  const extBox = (x) => `<div class="ext-box" data-ext="${x.id}"><div class="small"><i class="ti ti-clock-plus"></i> <b>${esc(x.user_name)}</b> asked for more time,
     until <b>${esc(dueLabel(x.new_due_date, x.new_due_time))}</b> <span class="faint">· ${esc(ago(x.created_at))}</span></div>
     <div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(x.reason)}</div>
-    ${admin ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
+    ${x.recommendation ? `<div class="small" style="margin-top:6px"><span class="pill ${x.recommendation === 'approve' ? 'in' : 'out'}"><i class="ti ti-thumb-${x.recommendation === 'approve' ? 'up' : 'down'}"></i>
+      ${esc(x.recommended_by_name || 'Management')} recommends ${x.recommendation === 'approve' ? 'approving' : 'refusing'}</span>${x.recommend_note ? ` <span class="muted">${esc(x.recommend_note)}</span>` : ''}</div>` : ''}
+    ${canApproveTime() && x.user_id !== App.user.id ? `<div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm success" data-ext-decide="approve"><i class="ti ti-check"></i>Approve</button>
       <button class="btn sm danger" data-ext-decide="reject"><i class="ti ti-x"></i>Refuse</button></div>`
-      : x.user_id === App.user.id ? App.extWaitHtml(x) : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
+      : x.user_id === App.user.id ? App.extWaitHtml(x)
+      : isManagement() && !canApproveTime() ? `<div class="faint small" style="margin-top:4px">Only an admin or manager can give more time. Tell them what you think:</div>
+        <div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" data-ext-recommend="approve"><i class="ti ti-thumb-up"></i>Recommend approve</button>
+        <button class="btn sm" data-ext-recommend="refuse"><i class="ti ti-thumb-down"></i>Recommend refuse</button></div>`
+      : '<div class="faint small" style="margin-top:4px">Waiting for an admin to answer.</div>'}</div>`;
+
+  /** A sub admin's recommendation on a request for more time; the admin still decides. */
+  async function recommendExtension(btn, extId, decision, done) {
+    const note = await App.confirm(decision === 'approve' ? 'Recommend more time?' : 'Recommend refusing?', 'The admins and managers are told, and one of them decides.',
+      { ok: 'Send recommendation', input: { label: decision === 'approve' ? 'Note for the admin (optional)' : 'Why?', required: decision !== 'approve' } });
+    if (note === null || (decision !== 'approve' && !note)) return;
+    try {
+      await App.busy(btn, () => api('job_extension_recommend', { data: { extension_id: extId, decision, note } }));
+      toast('Recommendation sent');
+      App.current?.refresh?.();
+      done && done();
+    } catch (err) { App.fail(err); }
+  }
 
   /** The job's tasks as a checklist. */
   function tasksHtml(j, admin) {
@@ -202,7 +221,7 @@
     const done = t.filter((x) => x.status === 'done').length;
     const row = (x) => {
       const pe = x.pending_extension;
-      const askMore = !admin && x.mine && x.status === 'open' && !pe && isDue(x) && ['open', 'in_progress', 'returned'].includes(j.status);
+      const askMore = !isAdmin() && x.mine && x.status === 'open' && !pe && isDue(x) && ['open', 'in_progress', 'returned'].includes(j.status);
       return `<div class="task-row ${x.status === 'done' ? 'done' : ''}" data-task="${x.id}">
         <input type="checkbox" data-tick ${x.status === 'done' ? 'checked' : ''} ${canTick && (x.mine || admin) ? '' : 'disabled'} aria-label="Done: ${esc(x.title)}">
         <div class="task-main"><div class="task-t" style="font-weight:500">${esc(x.title)}</div>
@@ -210,7 +229,7 @@
           <div class="small">${x.status === 'done' ? `<span class="faint">Done${x.done_by_name ? ' by ' + esc(x.done_by_name) : ''} · ${esc(fmtDateTime(x.done_at))}</span>${x.done_note ? `<div class="muted">${esc(x.done_note)}</div>` : ''}`
             : `${dueText(x) || '<span class="faint">No due date</span>'} ${App.timeLeftPill(x.due_date, x.due_time)}`}</div>
           <div class="chips">${assigneeChips(x.assignees)}</div>
-          ${pe ? extBox(pe, admin) : ''}
+          ${pe ? extBox(pe) : ''}
           ${askMore ? '<button class="btn sm ghost" data-extend style="margin-top:6px"><i class="ti ti-clock-plus"></i>Ask for more time</button>' : ''}</div>
         ${canEdit ? `<div class="task-acts"><button class="icon-btn" data-edit-task title="Edit task"><i class="ti ti-edit"></i></button>
           <button class="icon-btn" data-del-task title="Delete task"><i class="ti ti-trash"></i></button></div>` : ''}</div>`;
@@ -307,7 +326,7 @@
     const render = async () => {
       let j;
       try { j = (await api('job_get', { query: { id } })).job; } catch (e) { App.closeTop(); App.fail(e); return; }
-      const admin = isAdmin();
+      const admin = isManagement();
       const mine = j.is_assignee;
       const active = ['open', 'in_progress', 'returned'].includes(j.status);
       $('.drawer-head h2', el).textContent = `${j.ref} · ${j.title}`;
@@ -320,7 +339,7 @@
               : `Waiting for an admin to check. If nobody checks it by ${esc(clock(j.self_close_at))}, you can close it yourself.`}</div>` : ''}
         ${j.status === 'returned' && j.review_note ? `<div class="note-box bad" style="margin-bottom:12px"><b>Sent back:</b> ${esc(j.review_note)}</div>` : ''}
         ${j.status === 'requested' ? `<div class="note-box warn" style="margin-bottom:12px">Logged by ${esc(j.created_by_name || 'staff')}. ${admin ? 'Assign someone to accept it.' : 'Waiting for an admin to accept and assign it.'}</div>` : ''}
-        ${j.pending_extension ? extBox(j.pending_extension, admin) : ''}
+        ${j.pending_extension ? extBox(j.pending_extension) : ''}
         <dl class="kv"><dt>${j.client_type === 'company' ? 'Company' : j.client_type === 'school' ? 'School' : 'Client'}</dt><dd>${esc(j.client_name)}</dd>
           ${j.location ? `<dt>Location</dt><dd>${esc(j.location)}</dd>` : ''}
           ${j.contact_name || j.contact_phone ? `<dt>Contact</dt><dd>${esc(j.contact_name)}${j.contact_phone ? ` · <a href="tel:${esc(j.contact_phone)}">${esc(j.contact_phone)}</a>` : ''}</dd>` : ''}
@@ -354,6 +373,7 @@
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
       $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
       $$('[data-ext-decide]', el).forEach((b) => b.addEventListener('click', () => decideExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extDecide, render)));
+      $$('[data-ext-recommend]', el).forEach((b) => b.addEventListener('click', () => recommendExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extRecommend, render)));
       $$('[data-ext-proceed]', el).forEach((b) => b.addEventListener('click', () => App.proceedExtension(b, +b.dataset.extProceed, render)));
       App.tickTimeLeft($('.drawer-body', el));
       $$('[data-task]', el).forEach((row) => {
@@ -380,7 +400,7 @@
       if (!foot) { foot = document.createElement('div'); foot.className = 'drawer-foot'; el.appendChild(foot); }
       const btns = [];
       if (admin) {
-        if (j.status !== 'done' && j.status !== 'cancelled') btns.push('<button class="btn ghost" data-a="cancel"><i class="ti ti-ban"></i>Cancel job</button>');
+        if (isAdmin() && j.status !== 'done' && j.status !== 'cancelled') btns.push('<button class="btn ghost" data-a="cancel"><i class="ti ti-ban"></i>Cancel job</button>');
         if (['done', 'cancelled'].includes(j.status)) btns.push('<button class="btn" data-a="reopen"><i class="ti ti-arrow-back-up"></i>Reopen</button>');
         btns.push('<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>');
         if (j.status === 'requested') btns.push('<button class="btn primary" data-a="accept"><i class="ti ti-user-check"></i>Accept & assign</button>');
@@ -546,7 +566,7 @@
 
   /* ------------------------------------------------------- create / edit */
   async function editJob(j, prefill = null, done = null) {
-    const admin = isAdmin();
+    const admin = isManagement();
     const isNew = !j;
     const v = { title: '', client_type: 'school', client_name: '', location: '', contact_name: '', contact_phone: '', description: '', priority: 'normal', due_date: '', due_time: '', ...(j || {}), ...(prefill || {}) };
     const staff = admin && isNew ? await activeStaff() : [];
@@ -573,7 +593,7 @@
           <div class="help" style="margin:-2px 0 6px">Split the job into tasks, each with its own staff and time frame. Staff tick them off and can't end their day with one due and unfinished.</div>
           <div id="je-tasks"></div><button type="button" class="btn sm ghost" id="je-task-add" style="margin-top:8px"><i class="ti ti-plus"></i>Add task</button></div>` : ''}
         ${isNew ? '<div class="field"><div class="label">Photos (optional)</div><div id="je-up"></div></div>' : ''}
-      </form>`, `<button class="btn ghost" data-close>Cancel</button>${!isNew && admin ? '<button class="btn danger" id="je-del"><i class="ti ti-trash"></i>Delete</button>' : ''}
+      </form>`, `<button class="btn ghost" data-close>Cancel</button>${!isNew && isAdmin() ? '<button class="btn danger" id="je-del"><i class="ti ti-trash"></i>Delete</button>' : ''}
         <button class="btn primary" id="je-save">${isNew ? (admin ? 'Create job' : 'Send to admin') : 'Save'}</button>`, { wide: true });
     const up = isNew ? App.uploader($('#je-up', el), { label: 'Add photo' }) : null;
     // Task rows on a new job: title, due date/time and staff for each.

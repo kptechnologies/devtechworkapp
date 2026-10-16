@@ -59,7 +59,7 @@ function client_staff(string $name): array
 
 function act_clients_list(array $in, array $me): void
 {
-    require_admin();
+    require_management(); // the directory only; client records and billing stay with the admin
     $w = ['1=1'];
     $p = [];
     if (in_array($in['type'] ?? '', CLIENT_TYPES, true)) {

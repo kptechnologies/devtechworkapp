@@ -150,6 +150,33 @@ Each staff member gets their own list (overdue, due soon, sent back, high priori
 
 **Clients** lists every school and company with its contact, GPS point, open and overdue jobs and unfixed device faults. Each client page shows open jobs, job history, client sign-offs, daily reports from that location and the full device repair history. The directory is filled from your schools list and existing jobs, and a job typed with a new client name adds that client automatically.
 
+## Management roles
+
+Set a role under **Staff setup**. Every role below admin is still an employee: they clock in, file reports, have a wallet and appear on payroll like staff.
+
+| | Supervisor | Sub admin | Manager | Admin |
+|---|:-:|:-:|:-:|:-:|
+| Jobs and tasks: create, assign, check, send back, follow up | ✓ | ✓ | ✓ | ✓ |
+| Lessons, schemes, training, timetables, work tools | ✓ | ✓ | ✓ | ✓ |
+| View staff, attendance register, work reports, issues board | ✓ | ✓ | ✓ | ✓ |
+| Memos to staff, and requests to the admin | ✓ | ✓ | ✓ | ✓ (decides requests) |
+| Queries | Proposes | Raises and closes | Raises and closes | Raises, closes, sets fines |
+| More time on a job or task | Recommends | Recommends | Approves | Approves |
+| Expense review and funding requests | | | ✓ (not their own) | ✓ |
+| Add and edit staff accounts | | | Staff, supervisors, sub admins | Everyone |
+| Payroll, salaries, fines, bank details, balances, ledger, company wallet, settings | | | | ✓ |
+| Delete or cancel jobs, edit attendance | | | | ✓ |
+
+- **Proposed queries:** a supervisor's query isn't sent to the staff member. A manager, sub admin or admin reviews it, then issues or discards it, and the supervisor is told which.
+- **Recommendations for more time:** the recommendation shows on the request, and admins and managers get a notification. Nobody but an admin can answer their own request, review their own expense or decide their own funding request.
+
+## Memos, notes and requests
+
+- **Memos:** any management role sends a memo to all staff, to chosen people, or to management. Each person gets a notification and the sender sees who has read it.
+- **Notes from staff:** staff send a note or memo to management (admins, managers, sub admins and supervisors). Staff can't message each other.
+- **Requests:** a manager, sub admin or supervisor sends a request to the admin, who approves or declines it with a note. Open requests stay on the admin's Memos badge until answered.
+- Everyone can reply on a memo's thread. On a memo to staff, each staff member sees only the sender's replies and their own.
+
 ## Staff profiles and work tools
 
 Each staff profile shows contact, next-of-kin and bank details, responsibilities, tools held, attendance this month, jobs, reports and wallet. Staff keep their own details up to date under **Profile**.
@@ -186,6 +213,6 @@ uploads/         Receipts and photos (web access blocked; served through file.ph
 
 - Passwords are hashed with bcrypt. An account locks for 15 minutes after 5 failed sign-ins.
 - Every change needs a CSRF token, and every query uses prepared statements.
-- Staff can only see their own reports, transactions, requests, attendance and files, and only the jobs they're on or logged. This is enforced on the server.
+- Staff can only see their own reports, transactions, requests, attendance and files, and only the jobs they're on or logged. Management roles see work records; only managers also see expenses and funding requests, and only admins see pay. This is enforced on the server.
 - Uploads are checked by content (JPG, PNG, WEBP, GIF or PDF only, 8MB max), renamed randomly, and stored in a folder the web server won't serve directly.
 - Money changes, reviews, edits and imports are recorded in the `audit_log` table.

@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — daily work reports: wizard, list, detail, issues board */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, isAdmin } = App;
+  const { $, $$, esc, api, toast, fmtDate, fmtDateTime, isAdmin, isManagement } = App;
 
   const fieldsById = () => {
     const out = {};
@@ -193,7 +193,7 @@
     }
     // Open job orders to pick from, and today's clock-in to pre-fill the hours.
     App.myJobs = [];
-    if (!id || !isAdmin()) {
+    if (!id || !isManagement()) {
       try { App.myJobs = (await api('jobs_list', { query: { mine: 1, open: 1 } })).items; } catch { /* optional */ }
     }
     // Today's visits pre-fill the hours (first clock-in, last clock-out), the school, the work and the job orders tagged.
@@ -369,7 +369,7 @@
   const filterState = { from: '', to: '', user_id: '', location: '', finished: '', q: '' };
 
   async function reportsList(ctx) {
-    const admin = isAdmin();
+    const admin = isManagement();
     const staff = admin ? (await api('users_list')).items : [];
     const statuses = ['Yes – completed', 'Partially completed', 'No – not completed'];
     ctx.el.innerHTML = `
@@ -431,7 +431,7 @@
     const el = App.drawer('Report', App.loading());
     let r;
     try { r = (await api('report_get', { query: { id } })).report; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isAdmin();
+    const admin = isManagement();
     const fields = fieldsById();
     const d = r.data || {};
     const secs = App.cfg.schema.map((sec) => {
@@ -469,7 +469,7 @@
     App.bindGallery($('#rd-files', el));
     const foot = document.createElement('div');
     foot.className = 'drawer-foot';
-    foot.innerHTML = `${admin ? `<button class="btn danger" id="rd-del"><i class="ti ti-trash"></i>Delete</button>
+    foot.innerHTML = `${admin ? `${isAdmin() ? '<button class="btn danger" id="rd-del"><i class="ti ti-trash"></i>Delete</button>' : ''}
         <button class="btn" id="rd-handled"><i class="ti ti-${r.issues_closed == 1 ? 'arrow-back-up' : 'check'}"></i>${r.issues_closed == 1 ? 'Reopen issues' : 'Mark handled'}</button>` : ''}
       ${canEdit ? `<a class="btn primary" href="#/report/${r.id}/edit"><i class="ti ti-edit"></i>Edit</a>` : ''}`;
     el.appendChild(foot);
@@ -517,5 +517,5 @@
     $('#is-from', ctx.el).addEventListener('change', (e) => { from = e.target.value || from; load().catch(App.fail); });
     ctx.refresh = () => load().catch(() => {});
     await load();
-  }, { title: 'Issues', admin: true, live: true });
+  }, { title: 'Issues', manager: true, live: true });
 })();

@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — staff profiles, work tools register, attendance (clock in/out with GPS + selfie) */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin } = App;
+  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManagement } = App;
 
   const timeOf = (dt) => (dt ? new Date(dt.replace(' ', 'T')).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }) : '');
   const hrs = (min) => (min === null || min === undefined ? '' : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`);
@@ -379,7 +379,7 @@
   const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 
   App.route('attendance', async (ctx) => {
-    const admin = isAdmin();
+    const admin = isManagement();
     const staff = admin ? (await api('users_list')).items.filter((u) => u.active) : [];
     const t = App.cfg.today;
     let tab = App.store.get('dt-attab', admin ? 'register' : 'report');
@@ -387,7 +387,7 @@
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>${admin ? 'Attendance' : 'My attendance'}</h1>
         <p class="muted">Work hours ${esc(App.cfg.work_start)}–${esc(App.cfg.work_end)}${App.cfg.late_grace ? ` · ${App.cfg.late_grace} min grace` : ''}. Clock-ins after the start time are marked late.</p></div>
-        <div class="actions">${admin ? '<a class="btn" id="at-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn primary" id="at-add"><i class="ti ti-plus"></i>Add manually</button>' : ''}</div></div>
+        <div class="actions">${admin ? '<a class="btn" id="at-export"><i class="ti ti-download"></i>Export CSV</a>' + (isAdmin() ? '<button class="btn primary" id="at-add"><i class="ti ti-plus"></i>Add manually</button>' : '') : ''}</div></div>
       <div class="seg" id="at-tabs" style="margin-bottom:12px"><button data-t="register"><i class="ti ti-list"></i> Clock-ins</button><button data-t="report"><i class="ti ti-chart-bar"></i> Report</button></div>
       <div class="filters" id="at-filters">
         <label class="small muted" style="display:flex;gap:6px;align-items:center">From <input type="date" name="from" value="${st.from}" style="width:auto"></label>
@@ -421,7 +421,7 @@
         </div>
         ${admin && single && r.absent.length ? `<div class="card card-pad" style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="muted small"><i class="ti ti-user-off"></i> Not clocked in:</span>${r.absent.map((s) => `<button class="pill bad" data-add="${s.id}" title="Add manually">${esc(s.name)}</button>`).join('')}</div>` : ''}
-        <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Location / work done</th><th>Selfies</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
+        <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Location / work done</th><th>Selfies</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
           ${r.items.map((x) => `<tr>${single ? '' : `<td class="num">${esc(fmtDate(x.work_date, false))}</td>`}${admin ? `<td><a href="#/staff/${x.user_id}">${esc(x.user_name)}</a></td>` : ''}
             <td class="num">${esc(timeOf(x.in_at))} ${x.late && firstIns[x.user_id + x.work_date] === x ? `<span class="pill out">Late ${x.late_min}m</span>` : ''}</td>
             <td class="num">${x.out_at ? `${esc(timeOf(x.out_at))}${x.early ? ' <span class="pill out">Early</span>' : ''}` : x.missed_out ? '<span class="pill bad">No clock-out</span>' : '<span class="pill info">On site</span>'}</td>
@@ -430,7 +430,7 @@
               ${x.in_reason ? `<div class="small"><b>In:</b> ${esc(x.in_reason)}</div>` : ''}${x.out_reason ? `<div class="small"><b>Out:</b> ${esc(x.out_reason)}</div>` : ''}
               ${x.note ? `<div class="faint small" style="white-space:pre-wrap">${esc(x.note)}</div>` : ''}</td>
             <td><div class="gallery sm">${x.in_photo ? `<div class="thumb" data-file="${x.in_photo}" data-img="1" title="Clock-in selfie"><img src="file.php?id=${x.in_photo}&thumb=1" alt="Clock-in selfie" loading="lazy"></div>` : ''}${x.out_photo ? `<div class="thumb" data-file="${x.out_photo}" data-img="1" title="Clock-out selfie"><img src="file.php?id=${x.out_photo}&thumb=1" alt="Clock-out selfie" loading="lazy"></div>` : ''}</div></td>
-            ${admin ? `<td><button class="btn sm ghost" data-edit="${x.id}" aria-label="Edit"><i class="ti ti-edit"></i></button></td>` : ''}</tr>`).join('')}</tbody></table></div>`
+            ${isAdmin() ? `<td><button class="btn sm ghost" data-edit="${x.id}" aria-label="Edit"><i class="ti ti-edit"></i></button></td>` : ''}</tr>`).join('')}</tbody></table></div>`
           : App.empty('clock-off', 'No clock-ins', single ? 'Nobody has clocked in for this day yet.' : 'No records in this period.')}</div>`;
       App.bindGallery($('#at-body', ctx.el));
       $$('[data-edit]', ctx.el).forEach((b) => b.addEventListener('click', () => editAttendance(r.items.find((x) => x.id === +b.dataset.edit), staff, load)));
@@ -591,7 +591,7 @@
     $('#tl-add', ctx.el).addEventListener('click', () => editTool(null, cats, () => load()));
     ctx.refresh = () => load().catch(() => {});
     await load();
-  }, { title: 'Work tools', admin: true, live: true });
+  }, { title: 'Work tools', manager: true, live: true });
 
   async function openTool(id, staff, done) {
     const el = App.drawer('Tool', App.loading());
@@ -615,7 +615,7 @@
       App.bindGallery($('#td-files', el));
       let foot = $('.drawer-foot', el);
       if (!foot) { foot = document.createElement('div'); foot.className = 'drawer-foot'; el.appendChild(foot); }
-      foot.innerHTML = `<button class="btn danger" data-a="delete"><i class="ti ti-trash"></i></button><button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>
+      foot.innerHTML = `${isAdmin() ? '<button class="btn danger" data-a="delete"><i class="ti ti-trash"></i></button>' : ''}<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>
         ${t.holder_id ? '<button class="btn" data-a="return"><i class="ti ti-arrow-down-left"></i>Return to store</button>' : ''}
         ${['lost', 'retired'].includes(t.condition) ? '' : `<button class="btn primary" data-a="issue"><i class="ti ti-arrow-up-right"></i>${t.holder_id ? 'Reissue' : 'Issue to staff'}</button>`}`;
       $$('[data-a]', foot).forEach((b) => b.addEventListener('click', async () => {
@@ -683,7 +683,7 @@
   }
 
   /* ------------------------------------------------------------ profile */
-  App.route('staff/:id', (ctx) => profileView(ctx, +ctx.params.id), { title: 'Staff profile', nav: 'staff', admin: true, live: true });
+  App.route('staff/:id', (ctx) => profileView(ctx, +ctx.params.id), { title: 'Staff profile', nav: 'staff', manager: true, live: true });
   App.route('profile', (ctx) => profileView(ctx, null), { title: 'Profile' });
 
   const PTABS = [['details', 'Details', 'id'], ['tools', 'Tools', 'tools'], ['attendance', 'Attendance', 'clock'], ['jobs', 'Jobs', 'clipboard-list'], ['reports', 'Reports', 'clipboard-text'], ['wallet', 'Wallet', 'wallet'], ['queries', 'Queries', 'alert-triangle'], ['lessons', 'Lessons', 'school']];
@@ -694,25 +694,27 @@
     let tab = App.store.get('dt-ptab', 'details');
     const load = async () => {
       const p = await api('staff_profile', { query: { id: id || '' } });
+      if (tab === 'wallet' && !p.wallet) tab = 'details';
       const u = p.user;
       const m = p.month;
       ctx.el.innerHTML = `
         <div class="card card-pad profile-head" style="margin-bottom:14px">
-          <label class="avatar-edit" title="Change photo">${App.avatar(u, 'xl')}<input type="file" accept="image/*" class="sr" id="pf-photo"><span><i class="ti ti-camera"></i></span></label>
+          ${admin || self ? `<label class="avatar-edit" title="Change photo">${App.avatar(u, 'xl')}<input type="file" accept="image/*" class="sr" id="pf-photo"><span><i class="ti ti-camera"></i></span></label>` : App.avatar(u, 'xl')}
           <div class="main-col" style="min-width:0;flex:1"><h1 style="margin-bottom:2px">${esc(u.name)}</h1>
-            <div class="muted">${[u.job_title, u.role === 'admin' ? 'Administrator' : '', u.location].filter(Boolean).map(esc).join(' · ') || 'Staff'}</div>
+            <div class="muted">${[u.job_title, u.role === 'admin' ? 'Administrator' : u.role !== 'staff' ? App.roleLabel(u.role) : '', u.location].filter(Boolean).map(esc).join(' · ') || 'Staff'}</div>
             <div class="small muted" style="margin-top:4px">${esc(u.email)}${u.phone ? ` · <a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : ''}</div>
             ${u.duties.length ? `<div class="chips" style="margin-top:8px">${u.duties.map((d) => `<span class="pill brand">${esc(d)}</span>`).join('')}</div>` : ''}</div>
-          <div class="actions">${admin && !self ? `<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button><a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
+          <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
             ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}</div>
         </div>
         <div class="grid g4" style="margin-bottom:14px">
           <div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-calendar-check"></i></div><div class="label">Days present</div><div class="value">${m.days}</div><div class="sub">This month</div></div>
           <div class="card kpi"><div class="kpi-icon ${m.late ? 'tone-out' : 'tone-in'}"><i class="ti ti-clock-exclamation"></i></div><div class="label">Late days</div><div class="value">${m.late}</div><div class="sub">After ${esc(App.cfg.work_start)}</div></div>
           <div class="card kpi"><div class="kpi-icon tone-info"><i class="ti ti-hourglass"></i></div><div class="label">Avg hours / day</div><div class="value">${m.avg_hours}</div><div class="sub">${m.hours}h this month</div></div>
-          <div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-wallet"></i></div><div class="label">Wallet balance</div><div class="value">${money(p.wallet.balance)}</div><div class="sub">${p.tools.length} tool${p.tools.length === 1 ? '' : 's'} held</div></div>
+          ${p.wallet ? `<div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-wallet"></i></div><div class="label">Wallet balance</div><div class="value">${money(p.wallet.balance)}</div><div class="sub">${p.tools.length} tool${p.tools.length === 1 ? '' : 's'} held</div></div>`
+            : `<div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-tools"></i></div><div class="label">Tools held</div><div class="value">${p.tools.length}</div><div class="sub">Issued to them</div></div>`}
         </div>
-        <div class="seg scroll" id="pf-tabs" style="margin-bottom:12px">${PTABS.map(([k, l, i]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}${k === 'queries' && p.queries.length ? ` <span class="pill ${p.queries.some((x) => ['open', 'replied'].includes(x.status)) ? 'bad' : ''}" style="padding:0 6px">${p.queries.length}</span>` : ''}</button>`).join('')}</div>
+        <div class="seg scroll" id="pf-tabs" style="margin-bottom:12px">${PTABS.filter(([k]) => k !== 'wallet' || p.wallet).map(([k, l, i]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}${k === 'queries' && p.queries.length ? ` <span class="pill ${p.queries.some((x) => ['open', 'replied'].includes(x.status)) ? 'bad' : ''}" style="padding:0 6px">${p.queries.length}</span>` : ''}</button>`).join('')}</div>
         <div id="pf-body"></div>`;
       const body = $('#pf-body', ctx.el);
       const draw = () => {
@@ -726,7 +728,7 @@
         const acct = (await api('users_list')).items.find((x) => x.id === u.id);
         App.editUser?.(acct, load);
       });
-      $('#pf-photo', ctx.el).addEventListener('change', async (e) => {
+      $('#pf-photo', ctx.el)?.addEventListener('change', async (e) => {
         const f = e.target.files[0];
         if (!f) return;
         try { await api('staff_photo', { data: { id: u.id }, files: [await App.compressImage(f)] }); toast('Photo updated'); load(); } catch (err) { App.fail(err); }
@@ -744,22 +746,35 @@
       <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s)}</span></label>`).join('')}</div><div class="help">Tick every school they work at. Add new schools under Clients.</div></div>`;
   };
 
+  /** A manager may edit the work details of staff, supervisors and sub admins (never pay or bank details). */
+  const managerEdits = (u, self) => !App.isAdmin() && !self && App.canManageAccounts() && ['staff', 'supervisor', 'subadmin'].includes(u.role);
+
   function tabHtml(tab, p, admin, self) {
     const u = p.user;
+    const mgr = managerEdits(u, self);
+    if (tab === 'details' && !admin && !self && !mgr) {
+      // Sub admin looking at someone else: contact and work details, read only.
+      const row = (label, val) => (val ? `<div style="margin-bottom:10px"><div class="muted small">${label}</div><div>${esc(val)}</div></div>` : '');
+      return `<div class="card card-pad"><h3 style="margin-bottom:14px">Details</h3>
+        ${row('Job title', u.job_title)}${row('Phone', u.phone)}${row('Schools', (u.schools || []).join(', '))}${row('Address', u.address)}
+        ${row('Next of kin', [u.next_of_kin, u.next_of_kin_phone].filter(Boolean).join(' · '))}${row('Start date', u.start_date ? fmtDate(u.start_date, false) : '')}
+        ${u.duties.length ? `<div class="muted small">Responsibilities</div><div class="chips" style="margin-top:4px">${u.duties.map((d) => `<span class="pill brand">${esc(d)}</span>`).join('')}</div>` : ''}
+        <div class="help" style="margin-top:12px">Only the admin can change someone's account or details.</div></div>`;
+    }
     if (tab === 'details') {
       const f = (name, label, val, attrs = '') => `<div class="field"><label for="pd-${name}">${label}</label><input id="pd-${name}" name="${name}" value="${esc(val || '')}" ${attrs}></div>`;
       return `<div class="grid g2">
         <form class="card card-pad" id="pd-form"><h3 style="margin-bottom:14px">Personal details</h3>
-          ${admin ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
-            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>
-            <div class="field"><label for="pd-salary">Monthly salary (${esc(App.cfg.currency)})</label><input type="number" id="pd-salary" name="salary" min="0" step="0.01" value="${esc(+u.salary ? u.salary : '')}" style="max-width:220px">
+          ${admin || mgr ? `<div class="form-row">${f('job_title', 'Job title', u.job_title, 'placeholder="e.g. Field technician"')}
+            <div class="field"><label for="pd-start">Start date</label><input type="date" id="pd-start" name="start_date" value="${esc(u.start_date || '')}"></div></div>` : ''}
+          ${admin ? `<div class="field"><label for="pd-salary">Monthly salary (${esc(App.cfg.currency)})</label><input type="number" id="pd-salary" name="salary" min="0" step="0.01" value="${esc(+u.salary ? u.salary : '')}" style="max-width:220px">
               <div class="help">Payroll deducts attendance charges from this. See <a href="#/payroll">Payroll</a>.</div></div>` : ''}
           ${f('phone', 'Phone', u.phone, 'type="tel"')}
           ${App.schoolsField(u.schools)}
           ${f('address', 'Home address', u.address)}
           <div class="form-row">${f('next_of_kin', 'Next of kin', u.next_of_kin)}${f('next_of_kin_phone', 'Next of kin phone', u.next_of_kin_phone, 'type="tel"')}</div>
-          <div class="form-row">${f('bank_name', 'Bank', u.bank_name)}${f('bank_account', 'Account number', u.bank_account, 'inputmode="numeric"')}</div>
-          ${admin ? `<div class="field"><div class="label">Responsibilities</div><div class="opts">${App.cfg.duties.map((d) => `<label class="opt"><input type="checkbox" data-multi="1" name="duties" value="${esc(d)}" ${u.duties.includes(d) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(d)}</span></label>`).join('')}</div>
+          ${mgr ? '' : `<div class="form-row">${f('bank_name', 'Bank', u.bank_name)}${f('bank_account', 'Account number', u.bank_account, 'inputmode="numeric"')}</div>`}
+          ${admin || mgr ? `<div class="field"><div class="label">Responsibilities</div><div class="opts">${App.cfg.duties.map((d) => `<label class="opt"><input type="checkbox" data-multi="1" name="duties" value="${esc(d)}" ${u.duties.includes(d) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(d)}</span></label>`).join('')}</div>
             <div class="help">Pre-ticked on their daily report so they only see the questions for their kind of work.</div></div>` : u.duties.length ? '' : ''}
           <button class="btn primary" type="submit">Save details</button></form>
         ${self ? `<div class="stack"><form class="card card-pad" id="pw-form" novalidate><h3 style="margin-bottom:14px">Change password</h3>
@@ -771,14 +786,14 @@
       </div>`;
     }
     if (tab === 'tools') {
-      return `<div class="card"><div class="card-head"><h3>Tools held</h3>${admin ? '<button class="btn sm primary" id="pt-issue"><i class="ti ti-arrow-up-right"></i>Issue a tool</button>' : ''}</div>
+      return `<div class="card"><div class="card-head"><h3>Tools held</h3>${isManagement() ? '<button class="btn sm primary" id="pt-issue"><i class="ti ti-arrow-up-right"></i>Issue a tool</button>' : ''}</div>
         ${p.tools.length ? `<ul class="list">${p.tools.map((t) => `<li class="li" data-tool="${t.id}"><div class="li-icon tone-brand"><i class="ti ti-tools"></i></div>
           <div class="main-col"><div class="t">${esc(t.name)}</div><div class="s">${[t.category, t.tag_code, t.serial_no].filter(Boolean).map(esc).join(' · ')} · since ${esc(fmtDate(t.issued_at, false))}</div></div>${condPill(t.condition)}</li>`).join('')}</ul>`
-          : App.empty('tools', 'No tools issued', admin ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here.')}</div>`;
+          : App.empty('tools', 'No tools issued', isManagement() ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here.')}</div>`;
     }
     if (tab === 'attendance') {
       return `<div class="card card-pad" style="margin-bottom:14px"><h3 style="margin-bottom:10px">This month</h3><div id="pt-cal">${App.loading()}</div></div>
-        <div class="card"><div class="card-head"><h3>Recent clock-ins</h3>${admin ? `<a class="small" href="#/attendance">Attendance register</a>` : ''}</div>
+        <div class="card"><div class="card-head"><h3>Recent clock-ins</h3>${isManagement() ? `<a class="small" href="#/attendance">Attendance register</a>` : ''}</div>
         ${p.attendance.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Where</th></tr></thead><tbody>
           ${p.attendance.map((x) => `<tr><td class="num">${esc(fmtDate(x.work_date, false))}</td><td class="num">${esc(timeOf(x.in_at))} ${x.late ? '<span class="pill out">Late</span>' : ''}</td>
             <td class="num">${x.out_at ? esc(timeOf(x.out_at)) : '<span class="pill info">On site</span>'}</td><td class="r num">${hrs(x.minutes)}</td>
@@ -801,7 +816,7 @@
     if (tab === 'queries') {
       const warnings = p.queries.filter((x) => x.status === 'warning').length;
       return `<div class="card"><div class="card-head"><h3>Queries${warnings ? ` <span class="pill bad">${warnings} warning${warnings === 1 ? '' : 's'}</span>` : ''}</h3>
-        ${admin && !self ? '<button class="btn sm primary" id="pq-new"><i class="ti ti-alert-triangle"></i>Raise a query</button>' : ''}</div>${App.queryList(p.queries)}</div>`;
+        ${isManagement() && !self ? `<button class="btn sm primary" id="pq-new"><i class="ti ti-alert-triangle"></i>${App.canIssueQueries() ? 'Raise' : 'Propose'} a query</button>` : ''}</div>${App.queryList(p.queries)}</div>`;
     }
     const w = p.wallet;
     return `<div class="card card-pad"><div class="grid g3">
@@ -813,11 +828,11 @@
 
   function bindTab(tab, body, p, admin, self, reload) {
     if (tab === 'details') {
-      $('#pd-form', body).addEventListener('submit', async (e) => {
+      $('#pd-form', body)?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const d = App.formData(e.target);
         d.id = p.user.id;
-        if (admin && !d.duties) d.duties = [];
+        if ((admin || managerEdits(p.user, self)) && !d.duties) d.duties = [];
         try {
           const r = await App.busy(e.submitter, () => api('staff_profile_save', { data: d }));
           if (self) App.user = { ...App.user, phone: r.user.phone, location: r.user.location, schools: r.user.schools, duties: r.user.duties, job_title: r.user.job_title };
@@ -839,7 +854,7 @@
     }
     if (tab === 'tools') {
       $$('[data-tool]', body).forEach((li) => li.addEventListener('click', async () => {
-        if (!admin) return;
+        if (!isManagement()) return;
         const staff = (await api('users_list')).items.filter((u) => u.active);
         openTool(+li.dataset.tool, staff, reload);
       }));

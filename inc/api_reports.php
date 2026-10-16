@@ -61,7 +61,7 @@ function pending_devices(array $d): array
 function report_where(array $in, array $me, array &$params): string
 {
     $w = ['1=1'];
-    if (!is_admin($me)) {
+    if (!is_management($me)) {
         $w[] = 'r.user_id = ?';
         $params[] = $me['id'];
     } elseif (!empty($in['user_id'])) {
@@ -117,7 +117,7 @@ function load_report(int $id, array $me): array
     if (!$r) {
         fail('Report not found.', 404);
     }
-    if (!is_admin($me) && (int)$r['user_id'] !== $me['id']) {
+    if (!is_management($me) && (int)$r['user_id'] !== $me['id']) {
         fail('You can only view your own reports.', 403);
     }
     $r['data'] = report_normalize(json_decode($r['data'], true) ?: []);
@@ -169,7 +169,7 @@ function act_report_save(array $in, array $me): void
 
     $high = in_array($sum['priority'], ['High', 'Urgent'], true);
     if ($existing && $high && !in_array($existing['priority'], ['High', 'Urgent'], true)) {
-        notify_admins('report', strtoupper($sum['priority']) . ': ' . $existing['user_name'] . '’s report needs follow-up',
+        notify_managers('report', strtoupper($sum['priority']) . ': ' . $existing['user_name'] . '’s report needs follow-up',
             $sum['location'] . ' · ' . $data['report_date'], 'reports/' . $id, true);
     }
     if (!$existing) {
@@ -191,7 +191,7 @@ function act_report_save(array $in, array $me): void
         }
         $title = $me['name'] . ' submitted a report' . ($flags ? ' · ' . implode(', ', $flags) : '');
         // Email admins only when something needs attention.
-        notify_admins('report', $title, $sum['location'] . ' · ' . $data['report_date'], 'reports/' . $id, (bool)$flags);
+        notify_managers('report', $title, $sum['location'] . ' · ' . $data['report_date'], 'reports/' . $id, (bool)$flags);
     }
     json_out(['ok' => true, 'id' => $id, 'user_id' => $ownerId]);
 }
@@ -212,7 +212,7 @@ function act_report_delete(array $in, array $me): void
 
 function act_report_issue_toggle(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $id = (int)($in['id'] ?? 0);
     q('UPDATE reports SET issues_closed = ? WHERE id = ?', [!empty($in['closed']) ? 1 : 0, $id]);
     audit(!empty($in['closed']) ? 'issue_close' : 'issue_reopen', 'report', $id);
@@ -223,7 +223,7 @@ function act_report_issue_toggle(array $in, array $me): void
 /** Kanban: reports that need follow-up, grouped by issue type. */
 function act_issues(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $from = valid_date($in['from'] ?? null) ? $in['from'] : date('Y-m-d', strtotime('-30 days'));
     $params = [$from];
     $closed = !empty($in['closed']) ? '' : 'AND r.issues_closed = 0';
@@ -259,7 +259,7 @@ function act_issues(array $in, array $me): void
 
 function act_reports_export(array $in, array $me): void
 {
-    require_admin();
+    require_management();
     $params = [];
     $where = report_where($in, $me, $params);
     $rows = q("SELECT r.*, u.name AS user_name, u.email AS user_email FROM reports r JOIN users u ON u.id = r.user_id

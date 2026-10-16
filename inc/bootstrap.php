@@ -178,6 +178,52 @@ function is_admin(?array $u = null): bool
     return $u && $u['role'] === 'admin';
 }
 
+/** Everyone who works for the company and is tracked like staff (attendance, payroll). Admins are owners, not employees. */
+const EMPLOYEE_ROLES = ['staff', 'supervisor', 'subadmin', 'manager'];
+/** People who run the day-to-day work: jobs, tasks, lessons, timetables, memos. */
+const MANAGEMENT_ROLES = ['admin', 'manager', 'subadmin', 'supervisor'];
+const ROLE_LABELS = ['admin' => 'Admin', 'manager' => 'Manager', 'subadmin' => 'Sub admin', 'supervisor' => 'Supervisor', 'staff' => 'Staff'];
+
+function has_role(?array $u, array $roles): bool
+{
+    $u = $u ?? current_user();
+    return $u && in_array($u['role'], $roles, true);
+}
+
+function is_subadmin(?array $u = null): bool
+{
+    return has_role($u, ['subadmin']);
+}
+
+function is_management(?array $u = null): bool
+{
+    return has_role($u, MANAGEMENT_ROLES);
+}
+
+/** Gives more time on a job or task (approves extensions, moves deadlines later). */
+function can_approve_time(?array $u = null): bool
+{
+    return has_role($u, ['admin', 'manager']);
+}
+
+/** Reviews staff expenses and decides funding requests. */
+function can_review_money(?array $u = null): bool
+{
+    return has_role($u, ['admin', 'manager']);
+}
+
+/** Creates and edits staff accounts. A manager can't touch admin or manager accounts. */
+function can_manage_accounts(?array $u = null): bool
+{
+    return has_role($u, ['admin', 'manager']);
+}
+
+/** Issues and closes queries. A supervisor only proposes them. */
+function can_issue_queries(?array $u = null): bool
+{
+    return has_role($u, ['admin', 'manager', 'subadmin']);
+}
+
 function require_user(): array
 {
     $u = current_user();
@@ -192,6 +238,15 @@ function require_admin(): array
     $u = require_user();
     if (!is_admin($u)) {
         fail('Only admins can do that.', 403);
+    }
+    return $u;
+}
+
+function require_management(): array
+{
+    $u = require_user();
+    if (!is_management($u)) {
+        fail('Only management can do that.', 403);
     }
     return $u;
 }
