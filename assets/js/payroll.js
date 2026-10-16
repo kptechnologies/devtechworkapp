@@ -57,6 +57,28 @@
         <button class="btn primary" type="submit">Add</button></form>` : ''}`;
   }
 
+  /** Staff view of their own month: what was charged and why, with no amounts (those are admin-only). */
+  function recordHtml(c) {
+    const n = c.counts;
+    const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+    const days = c.days.map((d) => {
+      const items = d.items.map((i) => `<div>${esc(i.label)}${i.waived ? ` <span class="pill in" title="${esc(i.waived)}">Excused</span><div class="faint small">${esc(i.waived)}</div>` : ''}${i.note ? `<div class="faint small">${esc(i.note)}</div>` : ''}</div>`).join('');
+      const ot = d.overtime ? `<div>Worked late, out ${esc(timeOf(d.overtime.out_at))} <span class="pill ${OT_PILL[d.overtime.state][1]}">${OT_PILL[d.overtime.state][0]}</span></div>` : '';
+      return `<li class="li" style="display:block"><div class="t" style="margin-bottom:4px">${esc(fmtDate(d.date))}${d.in ? ` <span class="faint small">· in ${esc(timeOf(d.in))}${d.out ? `, out ${esc(timeOf(d.out))}` : ''}</span>` : ''}</div>
+        <div class="small" style="display:grid;gap:4px">${items}${ot}</div></li>`;
+    }).join('');
+    return `
+      <div class="grid g4" style="margin-bottom:14px">
+        ${kpi('Late', n.late, plural(n.late, 'day', 'days'), 'clock-exclamation', n.late ? 'tone-bad' : 'tone-in')}
+        ${kpi('Absent', n.absence, 'Without approval', 'calendar-x', n.absence ? 'tone-bad' : 'tone-in')}
+        ${kpi('Daily reports', n.report, 'Missed or late', 'file-alert', n.report ? 'tone-bad' : 'tone-in')}
+        ${kpi('Overtime', n.overtime, n.overtime_pending ? `${n.overtime_pending} awaiting approval` : 'Approved days', 'clock-plus', 'tone-info')}</div>
+      ${c.locked ? `<div class="note-box small" style="margin-bottom:14px"><i class="ti ti-lock"></i> Finalised on ${esc(fmtDate(c.locked_at))}.</div>` : ''}
+      ${c.rules_from > c.month + '-01' ? `<div class="faint small" style="margin-bottom:10px">Counted from ${esc(fmtDate(c.rules_from, false))}.</div>` : ''}
+      <h3 style="margin:0 0 8px">Day by day</h3>
+      <div class="card" style="margin-bottom:14px">${days ? `<ul class="list">${days}</ul>` : App.empty('mood-smile', 'A clean record', 'Every working day so far was on time with a report.')}</div>`;
+  }
+
   /** Admin drawer for one staff member's month. */
   async function payDrawer(uid, month, onChange) {
     const el = App.drawer('Payroll', App.loading());
@@ -177,20 +199,19 @@
   App.route('my-pay', async (ctx) => {
     let month = App.cfg.today.slice(0, 7);
     ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>My pay</h1><p class="muted">Your salary for the month after attendance charges and approved overtime. Final figures are confirmed at month end.</p></div></div>
+      <div class="page-head"><div><h1>My attendance record</h1><p class="muted">Late days, absences, daily reports and overtime for the month.</p></div></div>
       <div class="filters" id="mp-filters">${monthPicker(month)}</div>
       <div id="mp-body">${App.loading()}</div>`;
     const load = async () => {
       const c = await api('payroll_detail', { query: { month } });
       const r = c.rules;
-      $('#mp-body', ctx.el).innerHTML = breakdownHtml(c, false) + `<details class="card card-pad"><summary style="cursor:pointer;font-weight:500">How it's worked out</summary>
+      $('#mp-body', ctx.el).innerHTML = recordHtml(c) + `<details class="card card-pad"><summary style="cursor:pointer;font-weight:500">What counts</summary>
         <ul class="small muted" style="margin:10px 0 0;padding-left:18px;line-height:1.7">
-          <li>Late: ${money(r.late, { short: true })} a day; more than ${r.very_late_min} minutes late: ${money(r.very_late, { short: true })} instead.</li>
-          <li>Absent without approval: ${money(r.absent, { short: true })}. Failed to clock in but notified: ${money(r.absent_notified, { short: true })}.</li>
-          <li>Daily report not sent by ${esc(r.report_deadline)}: ${money(r.report_missing, { short: true })}.</li>
-          <li>Job order failures: ${money(r.job_failure, { short: true })}, added by your admin.</li>
-          <li>Clocking out ${r.overtime_min}+ minutes after ${esc(App.cfg.work_end)}: ${money(r.overtime, { short: true })} once approved.</li>
-          <li>Get permission in advance to report late or be absent; approved days aren't charged.</li></ul></details>`;
+          <li>Late: clocking in after ${esc(App.cfg.work_start)}; more than ${r.very_late_min} minutes counts as very late.</li>
+          <li>Absent: a working day with no clock-in and no approval.</li>
+          <li>Daily report: send it by ${esc(r.report_deadline)} each working day.</li>
+          <li>Overtime: clocking out ${r.overtime_min}+ minutes after ${esc(App.cfg.work_end)}, once your admin approves it.</li>
+          <li>Get permission in advance to report late or be absent; approved days are excused.</li></ul></details>`;
     };
     $('#mp-filters', ctx.el).addEventListener('change', (e) => {
       if (e.target.name !== 'month' || !e.target.value) return;
@@ -199,5 +220,5 @@
     });
     ctx.refresh = () => load().catch(() => {});
     await load();
-  }, { title: 'My pay', live: true });
+  }, { title: 'My attendance record', live: true });
 })();

@@ -30,6 +30,11 @@ function query_row(array $r): array
     $r['person_type'] = $r['user_id'] ? 'staff' : 'contractor';
     $r['category_label'] = QUERY_CATEGORIES[$r['category']] ?? $r['category'];
     $r['overdue'] = $r['status'] === 'open' && $r['reply_by'] && $r['reply_by'] < today();
+    // Fines are pay deductions, which only admins see.
+    if (!is_admin()) {
+        $r['fine'] = 0.0;
+        $r['pay_adjustment_id'] = null;
+    }
     return $r;
 }
 
@@ -105,6 +110,16 @@ function act_query_get(array $in, array $me): void
     $r['attachments'] = attachments_for('query', [$r['id']])[$r['id']] ?? [];
     $r['history'] = q("SELECT a.action, a.details, a.created_at, u.name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
                        WHERE a.entity = 'query' AND a.entity_id = ? ORDER BY a.id", [$r['id']])->fetchAll();
+    if (!is_admin($me)) {
+        foreach ($r['history'] as &$h) {
+            $d = json_decode((string)$h['details'], true);
+            if (is_array($d)) {
+                unset($d['fine'], $d['month']);
+                $h['details'] = json_encode($d);
+            }
+        }
+        unset($h);
+    }
     $r['counts'] = q('SELECT COUNT(*) AS total, SUM(status = \'warning\') AS warnings FROM staff_queries WHERE ' .
         ($r['user_id'] ? 'user_id = ?' : 'contractor_id = ?'), [$r['user_id'] ?: $r['contractor_id']])->fetch();
     json_out(['ok' => true, 'query' => $r, 'categories' => QUERY_CATEGORIES]);
@@ -238,7 +253,7 @@ function act_query_close(array $in, array $me): void
             'warning'   => 'Warning issued on query ' . $r['ref'],
             'withdrawn' => 'Query ' . $r['ref'] . ' withdrawn',
         };
-        notify([(int)$r['user_id']], 'query', $title, trim($note . ($adjId ? "\nFine: " . money_fmt($fine) . ' deducted from ' . date('F Y', strtotime($month . '-01')) . ' pay.' : '')), 'queries/' . $r['id']);
+        notify([(int)$r['user_id']], 'query', $title, $note, 'queries/' . $r['id']);
     }
     json_out(['ok' => true, 'adjustment_id' => $adjId]);
 }
