@@ -21,10 +21,13 @@ function profile_user(int $id): array
 
 function act_staff_profile(array $in, array $me): void
 {
-    $uid = is_admin($me) && !empty($in['id']) ? (int)$in['id'] : $me['id'];
+    $uid = is_manager($me) && !empty($in['id']) ? (int)$in['id'] : $me['id'];
     $u = profile_user($uid);
     if (!is_admin($me)) {
         unset($u['salary']); // pay figures are admin-only
+        if ($uid !== $me['id']) {
+            unset($u['bank_name'], $u['bank_account']); // a sub admin sees work, not another person's money
+        }
     }
     $tools = q('SELECT id, name, category, serial_no, tag_code, `condition`, issued_at FROM tools WHERE holder_id = ? ORDER BY name', [$uid])->fetchAll();
     $jobs = q(JOB_LIST_SQL . " WHERE EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL)
@@ -40,7 +43,7 @@ function act_staff_profile(array $in, array $me): void
         'reports' => $reports,
         'attendance' => attendance_visits(array_map('attendance_row', $att)),
         'month' => attendance_month($uid, date('Y-m-01'), today()),
-        'wallet' => wallet_stats($uid),
+        'wallet' => is_admin($me) || $uid === $me['id'] ? wallet_stats($uid) : null,
         'queries' => person_queries($uid, null),
     ]);
 }
@@ -112,7 +115,7 @@ function load_tool(int $id): array
 
 function act_tools_list(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $w = ['1=1'];
     $p = [];
     if (($in['holder'] ?? '') === 'store') {
@@ -141,7 +144,7 @@ function act_tools_list(array $in, array $me): void
 function act_tool_get(array $in, array $me): void
 {
     $t = load_tool((int)($in['id'] ?? 0));
-    if (!is_admin($me) && (int)$t['holder_id'] !== $me['id']) {
+    if (!is_manager($me) && (int)$t['holder_id'] !== $me['id']) {
         fail('This tool isn\'t issued to you.', 403);
     }
     $t['moves'] = q('SELECT m.action, m.`condition`, m.note, m.created_at, u.name AS user_name, b.name AS by_name FROM tool_moves m
@@ -152,7 +155,7 @@ function act_tool_get(array $in, array $me): void
 
 function act_tool_save(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $id = (int)($in['id'] ?? 0);
     $old = $id ? load_tool($id) : null;
     $v = [
@@ -197,7 +200,7 @@ function act_tool_save(array $in, array $me): void
 
 function act_tool_issue(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $t = load_tool((int)($in['id'] ?? 0));
     $uid = (int)($in['user_id'] ?? 0);
     $u = q('SELECT id, name FROM users WHERE id = ? AND active = 1', [$uid])->fetch();
@@ -225,7 +228,7 @@ function act_tool_issue(array $in, array $me): void
 
 function act_tool_return(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $t = load_tool((int)($in['id'] ?? 0));
     if (!$t['holder_id']) {
         fail('This tool is already in the store.');
@@ -635,7 +638,7 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
         $dates[] = date('Y-m-d', $t);
     }
     $p = [];
-    $w = "u.active = 1 AND u.role = 'staff'";
+    $w = "u.active = 1 AND u.role IN ('staff','subadmin')";
     if ($uid) {
         $w = 'u.id = ?';
         $p[] = $uid;
@@ -731,13 +734,13 @@ function report_range(array $in): array
 function act_attendance_report(array $in, array $me): void
 {
     [$from, $to] = report_range($in);
-    $uid = is_admin($me) ? ((int)($in['user_id'] ?? 0) ?: null) : $me['id'];
+    $uid = is_manager($me) ? ((int)($in['user_id'] ?? 0) ?: null) : $me['id'];
     json_out(['ok' => true] + attendance_report($from, $to, $uid));
 }
 
 function act_attendance_report_export(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     [$from, $to] = report_range($in);
     $r = attendance_report($from, $to, (int)($in['user_id'] ?? 0) ?: null);
     header('Content-Type: text/csv; charset=utf-8');
@@ -780,7 +783,7 @@ function act_attendance_list(array $in, array $me): void
     }
     $p = [$from, $to];
     $w = 'a.work_date BETWEEN ? AND ?';
-    if (!is_admin($me)) {
+    if (!is_manager($me)) {
         $w .= ' AND a.user_id = ?';
         $p[] = $me['id'];
     } elseif (!empty($in['user_id'])) {
@@ -790,9 +793,9 @@ function act_attendance_list(array $in, array $me): void
     $rows = attendance_with_photos(q('SELECT ' . ATT_COLS . " FROM attendance a JOIN users u ON u.id = a.user_id WHERE $w
         ORDER BY a.work_date DESC, a.in_at", $p)->fetchAll());
     $absent = [];
-    if (is_admin($me) && $from === $to && empty($in['user_id'])) {
+    if (is_manager($me) && $from === $to && empty($in['user_id'])) {
         $present = array_unique(array_column($rows, 'user_id'));
-        $absent = array_values(array_filter(q("SELECT id, name, location FROM users WHERE active = 1 AND role = 'staff' ORDER BY name")->fetchAll(),
+        $absent = array_values(array_filter(q("SELECT id, name, location FROM users WHERE active = 1 AND role IN ('staff','subadmin') ORDER BY name")->fetchAll(),
             fn($u) => !in_array((int)$u['id'], array_map('intval', $present), true)));
     }
     json_out(['ok' => true, 'from' => $from, 'to' => $to, 'work_start' => work_start(), 'items' => $rows, 'absent' => $absent]);
@@ -848,7 +851,7 @@ function act_attendance_edit(array $in, array $me): void
 
 function act_attendance_export(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $from = valid_date($in['from'] ?? null) ? $in['from'] : date('Y-m-01');
     $to = valid_date($in['to'] ?? null) ? $in['to'] : today();
     $p = [$from, $to];
@@ -885,7 +888,7 @@ function attendance_today_summary(): array
     foreach ($rows as $r) {
         $first[$r['user_id']] = $first[$r['user_id']] ?? $r;
     }
-    $staff = q("SELECT id, name FROM users WHERE active = 1 AND role = 'staff' ORDER BY name")->fetchAll();
+    $staff = q("SELECT id, name FROM users WHERE active = 1 AND role IN ('staff','subadmin') ORDER BY name")->fetchAll();
     $missing = array_values(array_filter($staff, fn($s) => !isset($first[$s['id']])));
     return [
         'in' => count($first),

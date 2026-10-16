@@ -1,7 +1,7 @@
 /* DevTech Staff Portal — staff queries: written notes on non-performance, staff replies, outcomes and fines */
 (function () {
   'use strict';
-  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin } = App;
+  const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManager } = App;
 
   const QSTATUS = {
     open: ['Awaiting reply', 'out'], replied: ['Replied', 'info'], resolved: ['Resolved', 'in'], warning: ['Warning issued', 'bad'], withdrawn: ['Withdrawn', ''],
@@ -23,8 +23,8 @@
     const fixed = q || preset.user_id || preset.contractor_id;
     if (!fixed) {
       try {
-        [staff, contractors] = await Promise.all([api('users_list').then((r) => r.items.filter((u) => +u.active && u.role === 'staff')),
-          api('contractors_list').then((r) => r.items)]);
+        [staff, contractors] = await Promise.all([api('users_list').then((r) => r.items.filter((u) => +u.active && u.role !== 'admin' && u.id !== App.user.id)),
+          isAdmin() ? api('contractors_list').then((r) => r.items) : []]);
       } catch (e) { App.fail(e); return; }
     }
     const v = q || { query_date: App.cfg.today, category: 'other', reply_by: App.addDays(App.cfg.today, 2) };
@@ -38,8 +38,8 @@
         <div class="field"><label for="qf-date">Date</label><input type="date" id="qf-date" name="query_date" value="${esc(v.query_date)}"></div></div>
       <div class="field"><label for="qf-det">What happened? <span class="req">*</span></label><textarea id="qf-det" name="details" rows="5" placeholder="Describe the non-performance and ask them to explain in writing why disciplinary action should not be taken.">${esc(v.details || '')}</textarea></div>
       <div class="form-row"><div class="field"><label for="qf-rb">Reply by</label><input type="date" id="qf-rb" name="reply_by" value="${esc(v.reply_by || '')}"></div>
-        <div class="field"><label for="qf-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qf-fine" name="fine" min="0" step="0.01" value="${esc(+v.fine ? v.fine : '')}" placeholder="0">
-          <div class="help">Optional. For staff, it is deducted from payroll when you close the query, unless you withdraw it.</div></div></div>
+        ${isAdmin() ? `<div class="field"><label for="qf-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qf-fine" name="fine" min="0" step="0.01" value="${esc(+v.fine ? v.fine : '')}" placeholder="0">
+          <div class="help">Optional. For staff, it is deducted from payroll when you close the query, unless you withdraw it.</div></div>` : '<div></div>'}</div>
       <div class="field"><div class="label">Evidence (photos, documents)</div><div id="qf-files"></div></div></form>`,
     `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="qf-ok"><i class="ti ti-send"></i>${q ? 'Save' : 'Issue query'}</button>`);
     const up = App.uploader($('#qf-files', el), { existing: q?.attachments?.length || 0, label: 'Add evidence' });
@@ -68,10 +68,10 @@
     const el = App.drawer('Query', App.loading());
     let x;
     try { x = (await api('query_get', { query: { id } })).query; } catch (e) { App.closeTop(); App.fail(e); return; }
-    const admin = isAdmin();
+    const admin = isManager();
     const live = ['open', 'replied'].includes(x.status);
     const own = x.user_id == App.user.id;
-    const canReply = live && (own || (admin && x.person_type === 'contractor'));
+    const canReply = live && (own || (isAdmin() && x.person_type === 'contractor'));
     $('.drawer-head h2', el).textContent = `${x.ref} · ${x.category_label}`;
     const hist = x.history.map((h) => {
       let d = {};
@@ -133,11 +133,11 @@
         <label class="opt"><input type="radio" name="outcome" value="warning"><span><i class="ti ti-alert-octagon"></i>Issue a warning</span></label>
         <label class="opt"><input type="radio" name="outcome" value="withdrawn"><span><i class="ti ti-arrow-back-up"></i>Withdraw the query</span></label></div></div>
       <div class="field"><label for="qc-note">Note</label><textarea id="qc-note" name="note" rows="3" placeholder="Required for a warning"></textarea></div>
-      <div class="form-row" id="qc-fine-row"><div class="field"><label for="qc-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qc-fine" name="fine" min="0" step="0.01" value="${esc(x.fine || '')}" placeholder="0"></div>
+      <div class="form-row ${isAdmin() ? '' : 'hide'}" id="qc-fine-row"><div class="field"><label for="qc-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qc-fine" name="fine" min="0" step="0.01" value="${esc(x.fine || '')}" placeholder="0"></div>
         ${staff ? `<div class="field"><label for="qc-month">Deduct from pay for</label><input type="month" id="qc-month" name="month" value="${esc(App.cfg.today.slice(0, 7))}"></div>` : '<div></div>'}</div>
-      <div class="help" id="qc-help">${staff ? 'A fine is added to Payroll as a deduction for that month.' : 'Contract staff aren\'t on payroll, so the fine is only recorded here. Deduct it when you next pay them.'}</div></form>`,
+      <div class="help ${isAdmin() ? '' : 'hide'}" id="qc-help">${staff ? 'A fine is added to Payroll as a deduction for that month.' : 'Contract staff aren\'t on payroll, so the fine is only recorded here. Deduct it when you next pay them.'}</div></form>`,
     '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="qc-ok">Close query</button>');
-    const sync = () => { $('#qc-fine-row', el).classList.toggle('hide', App.formData($('#qc-form', el)).outcome === 'withdrawn'); };
+    const sync = () => { $('#qc-fine-row', el).classList.toggle('hide', !isAdmin() || App.formData($('#qc-form', el)).outcome === 'withdrawn'); };
     $('#qc-form', el).addEventListener('change', sync);
     $('#qc-ok', el).addEventListener('click', async (e) => {
       const d = App.formData($('#qc-form', el));
@@ -155,7 +155,7 @@
   /* --------------------------------------------------------------- pages */
   const qf = { status: 'pending', person_type: '', category: '' };
   async function queriesView(ctx) {
-    const admin = isAdmin();
+    const admin = isManager();
     const load = async () => {
       const r = await api('queries_list', { query: admin ? qf : {} });
       const items = r.items;

@@ -50,7 +50,7 @@ function person_queries(?int $userId, ?int $contractorId): array
 /** Pulse badge: staff see queries waiting for their reply; admins see replies waiting for a decision. */
 function query_badge(array $me): int
 {
-    return is_admin($me)
+    return is_manager($me)
         ? (int)q("SELECT COUNT(*) FROM staff_queries WHERE status = 'replied'")->fetchColumn()
         : (int)q("SELECT COUNT(*) FROM staff_queries WHERE user_id = ? AND status = 'open'", [$me['id']])->fetchColumn();
 }
@@ -61,7 +61,7 @@ function load_query(int $id, array $me): array
     if (!$r) {
         fail('Query not found.', 404);
     }
-    if (!is_admin($me) && (int)$r['user_id'] !== $me['id']) {
+    if (!is_manager($me) && (int)$r['user_id'] !== $me['id']) {
         fail('You can only view your own queries.', 403);
     }
     return query_row($r);
@@ -71,7 +71,7 @@ function act_queries_list(array $in, array $me): void
 {
     $w = ['1=1'];
     $p = [];
-    if (!is_admin($me)) {
+    if (!is_manager($me)) {
         $w[] = 's.user_id = ?';
         $p[] = $me['id'];
     } else {
@@ -127,7 +127,7 @@ function act_query_get(array $in, array $me): void
 
 function act_query_save(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $id = (int)($in['id'] ?? 0);
     $existing = $id ? load_query($id, $me) : null;
     if ($existing && !in_array($existing['status'], ['open', 'replied'], true)) {
@@ -141,6 +141,13 @@ function act_query_save(array $in, array $me): void
     $date = (string)($in['query_date'] ?? today());
     $replyBy = valid_date($in['reply_by'] ?? null) ? $in['reply_by'] : null;
     $fine = max(0, money_in($in['fine'] ?? 0));
+    if (!is_admin($me)) {
+        // Fines are pay deductions: a sub admin's query keeps whatever fine the admin set, and can't add one.
+        $fine = $existing ? (float)q('SELECT fine FROM staff_queries WHERE id = ?', [$id])->fetchColumn() : 0.0;
+        if ($userId && q("SELECT role FROM users WHERE id = ?", [$userId])->fetchColumn() === 'admin') {
+            fail('Only an admin can query an admin.', 403);
+        }
+    }
     $jobId = (int)($in['job_id'] ?? 0) ?: null;
     $errors = [];
     if (!$userId && !$contractorId) {
@@ -214,15 +221,18 @@ function act_query_reply(array $in, array $me): void
     audit('query_reply', 'query', $r['id'], ['reply' => $reply]);
     touch_change();
     if ($own) {
-        notify_admins('query', $me['name'] . ' replied to ' . $r['ref'], $r['subject'] . "\n" . $reply, 'queries/' . $r['id'], false);
+        notify_managers('query', $me['name'] . ' replied to ' . $r['ref'], $r['subject'] . "\n" . $reply, 'queries/' . $r['id'], false);
     }
     json_out(['ok' => true]);
 }
 
 function act_query_close(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $r = load_query((int)($in['id'] ?? 0), $me);
+    if (!is_admin($me) && (float)q('SELECT fine FROM staff_queries WHERE id = ?', [$r['id']])->fetchColumn() > 0) {
+        fail('This query carries a fine, so only the admin can close it.', 403);
+    }
     if (!in_array($r['status'], ['open', 'replied'], true)) {
         fail('This query is already closed.');
     }
@@ -235,7 +245,7 @@ function act_query_close(array $in, array $me): void
         fail('Write the warning so it is on record.');
     }
     // The fine only applies when the query stands; withdrawing it drops the fine.
-    $fine = $outcome === 'withdrawn' ? 0.0 : max(0, money_in($in['fine'] ?? $r['fine']));
+    $fine = $outcome === 'withdrawn' || !is_admin($me) ? 0.0 : max(0, money_in($in['fine'] ?? $r['fine']));
     $month = valid_month($in['month'] ?? null) ? $in['month'] : date('Y-m');
     db()->beginTransaction();
     $adjId = null;

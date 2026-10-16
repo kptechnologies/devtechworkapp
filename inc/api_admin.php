@@ -56,7 +56,7 @@ function act_dashboard(array $in, array $me): void
             JOIN (SELECT location, MAX(id) AS id FROM reports WHERE report_date BETWEEN ? AND ? AND location <> '' GROUP BY location) x ON x.id = r.id
             ORDER BY r.laptops_faulty DESC", [$from, $to])->fetchAll();
 
-    $activeStaff = q("SELECT id, name FROM users WHERE role = 'staff' AND active = 1 ORDER BY name")->fetchAll();
+    $activeStaff = q("SELECT id, name FROM users WHERE role IN ('staff','subadmin') AND active = 1 ORDER BY name")->fetchAll();
     $reportedToday = array_map('intval', q('SELECT DISTINCT user_id FROM reports WHERE report_date = ?', [today()])->fetchAll(PDO::FETCH_COLUMN));
     $missing = array_values(array_filter($activeStaff, fn($s) => !in_array((int)$s['id'], $reportedToday, true)));
 
@@ -107,7 +107,7 @@ function act_dashboard(array $in, array $me): void
 
 function act_users_list(array $in, array $me): void
 {
-    require_admin();
+    require_manager();
     $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.schools, u.active, u.last_login, u.created_at,
                u.password_hash IS NOT NULL AS has_password,
                (SELECT MAX(report_date) FROM reports r WHERE r.user_id = u.id) AS last_report,
@@ -120,6 +120,9 @@ function act_users_list(array $in, array $me): void
         $r['has_password'] = (bool)$r['has_password'];
         $r['schools'] = user_schools($r);
         $r['balance'] = round((float)$r['balance'], 2);
+        if (!is_admin($me)) {
+            unset($r['balance']); // wallet money is admin-only
+        }
     }
     json_out(['ok' => true, 'items' => $rows]);
 }
@@ -130,7 +133,7 @@ function act_user_save(array $in, array $me): void
     $id = (int)($in['id'] ?? 0);
     $name = str_in($in['name'] ?? '', 120);
     $email = strtolower(str_in($in['email'] ?? '', 190));
-    $role = ($in['role'] ?? 'staff') === 'admin' ? 'admin' : 'staff';
+    $role = in_array($in['role'] ?? '', ['admin', 'subadmin'], true) ? $in['role'] : 'staff';
     $active = !empty($in['active']) ? 1 : 0;
     $pass = (string)($in['password'] ?? '');
     $errors = [];

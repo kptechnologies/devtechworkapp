@@ -178,6 +178,18 @@ function is_admin(?array $u = null): bool
     return $u && $u['role'] === 'admin';
 }
 
+function is_subadmin(?array $u = null): bool
+{
+    $u = $u ?? current_user();
+    return $u && $u['role'] === 'subadmin';
+}
+
+/** Admins and sub admins: people who run the day-to-day work (never money). */
+function is_manager(?array $u = null): bool
+{
+    return is_admin($u) || is_subadmin($u);
+}
+
 function require_user(): array
 {
     $u = current_user();
@@ -192,6 +204,15 @@ function require_admin(): array
     $u = require_user();
     if (!is_admin($u)) {
         fail('Only admins can do that.', 403);
+    }
+    return $u;
+}
+
+function require_manager(): array
+{
+    $u = require_user();
+    if (!is_manager($u)) {
+        fail('Only admins and sub admins can do that.', 403);
     }
     return $u;
 }

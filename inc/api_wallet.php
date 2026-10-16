@@ -226,7 +226,7 @@ function act_credit_send(array $in, array $me): void
     require_admin();
     $ids = array_values(array_unique(array_map('intval', (array)($in['user_ids'] ?? []))));
     if (!empty($in['all'])) {
-        $ids = array_map('intval', q("SELECT id FROM users WHERE role = 'staff' AND active = 1")->fetchAll(PDO::FETCH_COLUMN));
+        $ids = array_map('intval', q("SELECT id FROM users WHERE role IN ('staff','subadmin') AND active = 1")->fetchAll(PDO::FETCH_COLUMN));
     }
     $amount = money_in($in['amount'] ?? 0);
     $date = (string)($in['txn_date'] ?? today());

@@ -48,7 +48,7 @@ function wallet_all_balances(): array
             SUM(CASE WHEN w.kind='debit' AND w.status IN ('posted','queried') THEN 1 ELSE 0 END) AS pending,
             MAX(w.created_at) AS last_activity
         FROM users u LEFT JOIN wallet_txns w ON w.user_id = u.id
-        WHERE u.role = 'staff' OR w.id IS NOT NULL
+        WHERE u.role IN ('staff','subadmin') OR w.id IS NOT NULL
         GROUP BY u.id, u.name, u.email, u.location, u.active
         ORDER BY u.active DESC, u.name", [$t, $m, $t])->fetchAll();
     foreach ($rows as &$r) {

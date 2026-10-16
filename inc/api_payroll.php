@@ -49,7 +49,7 @@ function month_locked(string $month, int $uid): bool
 /** Staff on the payroll for a month: active staff, plus anyone who clocked in that month. */
 function payroll_staff(string $month): array
 {
-    return q("SELECT id, name, salary, bank_name, bank_account FROM users WHERE role = 'staff'
+    return q("SELECT id, name, salary, bank_name, bank_account FROM users WHERE role IN ('staff','subadmin')
         AND (active = 1 OR id IN (SELECT user_id FROM attendance WHERE work_date BETWEEN ? AND ?)) ORDER BY name",
         [$month . '-01', date('Y-m-t', strtotime($month . '-01'))])->fetchAll();
 }
@@ -70,7 +70,7 @@ function payroll_overtime_pending(?int $uid = null, ?string $month = null): arra
     }
     array_push($p, work_end(), (int)$r['overtime_min'], $r['effective_from']);
     $rows = q("SELECT a.user_id, u.name, a.work_date, MAX(a.out_at) AS out_at FROM attendance a
-        JOIN users u ON u.id = a.user_id AND u.role = 'staff'
+        JOIN users u ON u.id = a.user_id AND u.role IN ('staff','subadmin')
         WHERE a.out_at IS NOT NULL $w
         GROUP BY a.user_id, u.name, a.work_date, u.start_date
         HAVING MAX(a.out_at) >= TIMESTAMP(a.work_date, ?) + INTERVAL ? MINUTE
