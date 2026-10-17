@@ -228,6 +228,13 @@ function act_settings_get(array $in, array $me): void
         'pay_rules' => pay_rules(),
         'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'cron_path' => dirname(__DIR__) . '/cron.php', 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
         'smtp' => $smtp,
+        'google' => [
+            'client_id' => google_cfg()['client_id'] ?? '',
+            'client_secret' => !empty(google_cfg()['client_secret']) ? '••••••••' : '',
+            'redirect_uri' => google_redirect_uri(),
+            'linked' => (int)q('SELECT COUNT(*) FROM google_links')->fetchColumn(),
+        ],
+        'push_devices' => (int)q('SELECT COUNT(DISTINCT user_id) FROM push_subscriptions')->fetchColumn(),
     ]]);
 }
 
@@ -351,6 +358,14 @@ function act_settings_save(array $in, array $me): void
             'pass' => ($s['pass'] ?? '') === '••••••••' ? ($old['pass'] ?? '') : (string)($s['pass'] ?? ''),
             'from_email' => str_in($s['from_email'] ?? '', 190),
             'from_name' => str_in($s['from_name'] ?? '', 120),
+        ]);
+    }
+    if (isset($in['google']) && is_array($in['google'])) {
+        $old = google_cfg();
+        $secret = (string)($in['google']['client_secret'] ?? '');
+        save_setting('google', [
+            'client_id' => str_in($in['google']['client_id'] ?? '', 300),
+            'client_secret' => $secret === '••••••••' ? ($old['client_secret'] ?? '') : trim($secret),
         ]);
     }
     audit('settings_save', 'settings', null, array_keys($in));

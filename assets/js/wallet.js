@@ -35,6 +35,8 @@
         <div class="page-head"><div><p class="muted">${greet}</p><h1>${esc(App.user.name.split(' ')[0])}</h1></div></div>
         <div class="grid g-main">
           <div class="stack">
+            <div id="home-notices"></div>
+            <div id="home-push"></div>
             <div id="home-clock"></div>
             ${heroHtml(r.wallet)}
             <div class="quick">
@@ -67,6 +69,8 @@
         else if (a === 'request') openRequest();
         else App.go('report/new');
       }));
+      App.renderNotices?.($('#home-notices', ctx.el));
+      App.renderPushPrompt?.($('#home-push', ctx.el));
       App.renderClockCard?.($('#home-clock', ctx.el));
       App.renderMyJobs?.($('#home-jobs', ctx.el));
     };

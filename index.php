@@ -15,6 +15,9 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <title><?= $name ?></title>
 <link rel="icon" href="<?= $v('assets/logo-mark.png') ?>" type="image/png">
 <link rel="apple-touch-icon" href="<?= $v('assets/logo-mark.png') ?>">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="<?= $name ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
@@ -39,6 +42,7 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <script src="<?= $v('assets/js/lessons.js') ?>"></script>
 <script src="<?= $v('assets/js/timetable.js') ?>"></script>
 <script src="<?= $v('assets/js/memos.js') ?>"></script>
+<script src="<?= $v('assets/js/notices.js') ?>"></script>
 <script src="<?= $v('assets/js/admin.js') ?>"></script>
 </body>
 </html>

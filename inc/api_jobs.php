@@ -307,7 +307,8 @@ function act_job_save(array $in, array $me): void
 
     $ref = job_ref($id);
     if ($added) {
-        notify($added, 'job', "New job $ref: {$v['title']}", $v['client_name'] . ($v['due_date'] ? ' · due ' . due_label($v['due_date'], $v['due_time']) : ''), 'jobs/' . $id);
+        notify($added, 'job', "New job $ref: {$v['title']}", $v['client_name'] . ($v['due_date'] ? ' · due ' . due_label($v['due_date'], $v['due_time']) : ''), 'jobs/' . $id, true,
+            ['gtasks' => true, 'due' => (string)$v['due_date']]);
     }
     foreach ($taskPeople as $uid => $taskIds) {
         notify([$uid], 'job', "Your tasks on $ref: {$v['title']}", implode("\n", array_map('job_task_line', $taskIds)), 'jobs/' . $id, false);
@@ -354,7 +355,8 @@ function act_job_assign(array $in, array $me): void
     db()->commit();
     touch_change();
     if ($added) {
-        notify($added, 'job', "New job {$job['ref']}: {$job['title']}", $job['client_name'] . ($job['due_date'] ? ' · due ' . $job['due_date'] : ''), 'jobs/' . $job['id']);
+        notify($added, 'job', "New job {$job['ref']}: {$job['title']}", $job['client_name'] . ($job['due_date'] ? ' · due ' . $job['due_date'] : ''), 'jobs/' . $job['id'], true,
+            ['gtasks' => true, 'due' => (string)$job['due_date']]);
     }
     if ($removed) {
         notify($removed, 'job', "You were taken off {$job['ref']}", $job['title'], '', false);
@@ -825,7 +827,7 @@ function act_job_task_save(array $in, array $me): void
     db()->commit();
     touch_change();
     if ($joined) {
-        notify($joined, 'job', "New job {$job['ref']}: {$job['title']}", $job['client_name'], 'jobs/' . $job['id']);
+        notify($joined, 'job', "New job {$job['ref']}: {$job['title']}", $job['client_name'], 'jobs/' . $job['id'], true, ['gtasks' => true, 'due' => (string)$job['due_date']]);
     }
     if ($given) {
         notify($given, 'job', "New task on {$job['ref']}: " . str_in($in['title'] ?? '', 190), $line . "\n" . $job['client_name'], 'jobs/' . $job['id'], !$joined);

@@ -42,6 +42,7 @@
         <div class="page-head"><div><h1>Overview</h1><p class="muted">${esc(fmtDate(d.from))} – ${esc(fmtDate(d.to))}</p></div>
           <div class="actions"><div class="seg" id="db-range">${RANGES.map(([k, l]) => `<button data-r="${k}" class="${k === range ? 'on' : ''}">${l}</button>`).join('')}</div>
           <a class="btn primary" href="#/pay"><i class="ti ti-send"></i>Send payment</a></div></div>
+        <div id="db-notices" style="margin-bottom:14px"></div><div id="db-push" style="margin-bottom:14px"></div>
         <div class="grid g4" style="margin-bottom:14px">
           ${kpi('Total sent', money(m.sent), 'Allowances, budgets, top-ups', 'arrow-up-right', 'tone-in')}
           ${kpi('Total spent', money(m.spent), `${m.n_expenses} expenses · ${m.sent ? Math.round((m.spent / m.sent) * 100) : 0}% of sent`, 'receipt', 'tone-out')}
@@ -109,6 +110,8 @@
               `<span class="pill bad">${esc(f.location)}: ${f.laptops_faulty}/${f.laptops_total || '?'}</span>`).join('')}</div>` : ''}</div></div>
         </div>`;
 
+      App.renderNotices?.($('#db-notices', ctx.el));
+      App.renderPushPrompt?.($('#db-push', ctx.el));
       $$('#db-range button', ctx.el).forEach((b) => b.addEventListener('click', () => { range = b.dataset.r; App.store.set('dt-range', range); ctx.refresh(); }));
       $$('[data-txn]', ctx.el).forEach((r) => r.addEventListener('click', () => App.openTxn(+r.dataset.txn)));
       $$('[data-q]', ctx.el).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); App.review([+b.closest('[data-txn]').dataset.txn], b.dataset.q); }));
@@ -374,6 +377,13 @@
             <div class="field"><label>From email</label><input type="email" name="from_email" value="${esc(sm.from_email || '')}" placeholder="portal@devtech.ng"></div></div>
           <div class="field"><label>From name</label><input name="from_name" value="${esc(sm.from_name || '')}"></div>
           <div class="actions"><button class="btn primary" type="submit">Save email settings</button><button class="btn" type="button" id="se-test"><i class="ti ti-mail-forward"></i>Send test email</button></div></form>
+        <form class="card card-pad" id="se-google"><h3 style="margin-bottom:4px">Phone alerts &amp; Google Tasks</h3>
+          <p class="muted small" style="margin-bottom:14px">Phone alerts need nothing set up: each staff member turns them on from their profile (${+s.push_devices} so far). They need the portal on HTTPS.</p>
+          <p class="muted small" style="margin-bottom:10px">For Google Tasks, make an OAuth client in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> (type <b>Web application</b>) and turn on the <b>Google Tasks API</b>. Staff then link their own Google account from their profile (${+s.google.linked} linked).</p>
+          <div class="field"><label>Authorised redirect URI</label><input readonly value="${esc(s.google.redirect_uri)}" onclick="this.select()"><div class="help">Paste this into the OAuth client exactly. Set <b>base_url</b> in config.php if it shows the wrong address.</div></div>
+          <div class="field"><label for="se-gid">Client ID</label><input id="se-gid" name="client_id" value="${esc(s.google.client_id)}" autocomplete="off" placeholder="…apps.googleusercontent.com"></div>
+          <div class="field"><label for="se-gsec">Client secret</label><input type="password" id="se-gsec" name="client_secret" value="${esc(s.google.client_secret)}" autocomplete="new-password"></div>
+          <button class="btn primary" type="submit">Save Google settings</button></form>
         <form class="card card-pad" id="se-att"><h3 style="margin-bottom:4px">Attendance</h3>
           <p class="muted small" style="margin-bottom:14px">Staff clock in and out on their phone with a selfie and a fresh GPS reading. Phones only share location on HTTPS.
             School GPS points are set on each <a href="#/clients">client</a>.</p>
@@ -483,6 +493,10 @@
     $('#se-smtp', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
       try { await App.busy(e.submitter, () => api('settings_save', { data: { smtp: App.formData(e.target) } })); toast('Email settings saved'); } catch (err) { App.fail(err); }
+    });
+    $('#se-google', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await App.busy(e.submitter, () => api('settings_save', { data: { google: App.formData(e.target) } })); toast('Google settings saved'); } catch (err) { App.fail(err); }
     });
     $('#se-test', ctx.el).addEventListener('click', async (e) => {
       try { const r = await App.busy(e.currentTarget, () => api('smtp_test', { data: {} })); toast(r.message); } catch (err) { App.fail(err); }

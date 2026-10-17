@@ -483,3 +483,16 @@ img.avatar { object-fit: cover; padding: 0; }
 .tt-slot.mine { border-left: 4px solid var(--brand); background: var(--brand-soft); }
 @media (max-width: 900px) { .tt-grid { grid-template-columns: 1fr; } }
 .task-new { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--border-2); border-radius: 10px; margin-top: 8px; }
+
+/* General notices pinned on the home page */
+.notice-banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--brand-soft); color: var(--text); border-left: 4px solid var(--brand); }
+.notice-banner > .ti { font-size: 22px; color: var(--brand-text); margin-top: 1px; }
+.notice-banner .t { font-weight: 600; }
+.notice-banner .b { font-size: 13px; white-space: pre-wrap; margin-top: 2px; }
+.notice-banner .s { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+.notice-banner .acts { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.notice-banner.urgent { background: var(--bad-soft); border-left-color: var(--bad); }
+.notice-banner.urgent > .ti { color: var(--bad); }
+@media (max-width: 640px) { .notice-banner { flex-wrap: wrap; } .notice-banner .main-col { flex: 1 1 calc(100% - 40px); } .notice-banner .acts { margin-left: 34px; } }
+.alerts-card .li .s { white-space: normal; overflow: visible; }
+.alerts-card .li { align-items: flex-start; flex-wrap: wrap; }

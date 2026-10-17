@@ -1,9 +1,16 @@
 <?php
 /**
- * In-app notifications + optional email.
+ * In-app notifications, plus email, phone alerts (web push) and Google Tasks.
  */
 
-function notify(array $userIds, string $type, string $title, string $body = '', string $link = '', bool $email = true): void
+require_once __DIR__ . '/webpush.php';
+require_once __DIR__ . '/gtasks.php';
+
+/**
+ * $via: 'push' => false skips the phone alert (on by default); 'gtasks' => true also adds a task to linked
+ * Google Tasks lists, with 'due' => 'Y-m-d' when there is a due date.
+ */
+function notify(array $userIds, string $type, string $title, string $body = '', string $link = '', bool $email = true, array $via = []): void
 {
     $userIds = array_unique(array_filter(array_map('intval', $userIds)));
     if (!$userIds) {
@@ -11,6 +18,12 @@ function notify(array $userIds, string $type, string $title, string $body = '', 
     }
     foreach ($userIds as $uid) {
         q('INSERT INTO notifications (user_id, type, title, body, link, created_at) VALUES (?,?,?,?,?,NOW())', [$uid, $type, $title, $body, $link]);
+    }
+    if ($via['push'] ?? true) {
+        after_response(fn() => push_to_users($userIds, $title, $body, $link));
+    }
+    if (!empty($via['gtasks'])) {
+        after_response(fn() => gtasks_to_users($userIds, $title, $body, (string)($via['due'] ?? ''), $link));
     }
     if ($email && !empty(setting('smtp')['enabled'])) {
         $in = implode(',', array_fill(0, count($userIds), '?'));
@@ -43,19 +56,29 @@ function email_layout(string $inner): string
 /** Emails are sent after the HTTP response is flushed so the UI stays fast. */
 function queue_mail(string $to, string $name, string $subject, string $html): void
 {
+    after_response(fn() => send_mail($to, $name, $subject, $html));
+}
+
+/** Run slow work (mail, phone alerts, Google Tasks) after the response is sent. Each job is isolated from the others. */
+function after_response(callable $job): void
+{
     static $registered = false;
-    $GLOBALS['MAIL_QUEUE'][] = [$to, $name, $subject, $html];
+    $GLOBALS['AFTER_RESPONSE'][] = $job;
     if (!$registered) {
         $registered = true;
         register_shutdown_function(function () {
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
+            } elseif (function_exists('litespeed_finish_request')) {
+                litespeed_finish_request();
             }
-            foreach ($GLOBALS['MAIL_QUEUE'] ?? [] as [$to, $name, $subject, $html]) {
+            ignore_user_abort(true);
+            // Jobs may queue more jobs, so read the queue as it grows.
+            for ($i = 0; $i < count($GLOBALS['AFTER_RESPONSE']); $i++) {
                 try {
-                    send_mail($to, $name, $subject, $html);
+                    ($GLOBALS['AFTER_RESPONSE'][$i])();
                 } catch (Throwable $e) {
-                    error_log('Mail failed: ' . $e->getMessage());
+                    error_log('Background job failed: ' . $e->getMessage());
                 }
             }
         });

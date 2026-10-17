@@ -707,6 +707,7 @@
           <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
             ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}</div>
         </div>
+        ${self ? '<div id="pf-alerts"></div>' : ''}
         <div class="grid g4" style="margin-bottom:14px">
           <div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-calendar-check"></i></div><div class="label">Days present</div><div class="value">${m.days}</div><div class="sub">This month</div></div>
           <div class="card kpi"><div class="kpi-icon ${m.late ? 'tone-out' : 'tone-in'}"><i class="ti ti-clock-exclamation"></i></div><div class="label">Late days</div><div class="value">${m.late}</div><div class="sub">After ${esc(App.cfg.work_start)}</div></div>
@@ -724,6 +725,7 @@
       };
       $$('#pf-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; App.store.set('dt-ptab', tab); draw(); }));
       $('#pf-out', ctx.el)?.addEventListener('click', App.logout);
+      App.renderAlertsCard?.($('#pf-alerts', ctx.el));
       $('#pf-account', ctx.el)?.addEventListener('click', async () => {
         const acct = (await api('users_list')).items.find((x) => x.id === u.id);
         App.editUser?.(acct, load);
