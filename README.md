@@ -35,6 +35,8 @@ A self-hosted web app for daily work reports, job orders, staff attendance, work
 7. **Reminders**: in **Settings → Follow-up reminders**, choose the send time and any extra addresses (e.g. an operations inbox), then press **Send digest now** to check it arrives.
 8. **Work tools**: add your laptops, toolkits and testers under **Work tools** and issue them to staff. Laptops need their brand, model, serial number, RAM, storage and a photo on record before they can be issued. Staff report problems from **Profile → Tools**; management sends items for repair and records the repairer, cost and outcome.
 
+9. **Ideas & plans**: any staff member can post an idea, a plan for the company or a recommendation under **Ideas & plans**. Everyone can vote and comment; management reviews each post and gives approved ones an owner and a due date, and the owner marks progress until it is done.
+
 ## Updating an existing install
 
 Upload the new files over the old ones (keep `config.php` and `uploads/`). The database upgrades itself the next time anyone opens the portal: new tables and columns are added and nothing is deleted.
