@@ -16,6 +16,7 @@ require __DIR__ . '/inc/api_learning.php';
 require __DIR__ . '/inc/api_timetable.php';
 require __DIR__ . '/inc/api_memos.php';
 require __DIR__ . '/inc/api_notices.php';
+require __DIR__ . '/inc/api_ideas.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/import.php';
 
@@ -52,7 +53,7 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
     'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'memos_list', 'memo_get', 'memo_people',
-    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status'];
+    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -202,6 +203,7 @@ function act_pulse(array $in, array $me): void
         'lessons' => lesson_badge($me),
         'memos'   => memo_badge($me),
         'notices' => notice_badge($me),
+        'ideas'   => idea_badge($me),
     ] + job_badges($me);
     if (can_review_money($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();

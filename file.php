@@ -19,6 +19,8 @@ if (!$a) {
 $managerFile = (is_management($me) && in_array($a['owner_type'], ['report', 'attend', 'attendout', 'tool', 'avatar', 'query', 'jobnote',
     'lprep', 'lplan', 'lclass', 'lwork', 'lbrief', 'trainref', 'trainproof'], true))
     || (can_review_money($me) && in_array($a['owner_type'], ['txn', 'request'], true));
+// The ideas board is open to everyone, so its photos are too.
+$managerFile = $managerFile || $a['owner_type'] === 'idea';
 if (!is_admin($me) && !$managerFile) {
     $owner = match ($a['owner_type']) {
         'report'  => q('SELECT user_id FROM reports WHERE id = ?', [$a['owner_id']])->fetchColumn(),

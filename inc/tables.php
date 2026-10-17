@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -634,6 +634,42 @@ function table_sql(): array
             tasklist_id VARCHAR(190) NOT NULL DEFAULT '',
             last_error VARCHAR(300) NOT NULL DEFAULT '',
             linked_at DATETIME NOT NULL
+        ) $t",
+        // v17: ideas, plans and recommendations posted by staff, voted on and followed through by an owner
+        "CREATE TABLE IF NOT EXISTS ideas (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            kind VARCHAR(16) NOT NULL DEFAULT 'idea',
+            title VARCHAR(190) NOT NULL,
+            body TEXT NULL,
+            category VARCHAR(60) NOT NULL DEFAULT '',
+            status VARCHAR(12) NOT NULL DEFAULT 'new',
+            owner_id INT UNSIGNED NULL,
+            due_date DATE NULL,
+            decision_note VARCHAR(1000) NOT NULL DEFAULT '',
+            decided_by INT UNSIGNED NULL,
+            decided_at DATETIME NULL,
+            done_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NULL,
+            KEY idx_status (status),
+            KEY idx_user (user_id),
+            KEY idx_owner (owner_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS idea_votes (
+            idea_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (idea_id, user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS idea_comments (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            idea_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            kind VARCHAR(10) NOT NULL DEFAULT 'comment',
+            body TEXT NOT NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_idea (idea_id)
         ) $t",
     ];
 }

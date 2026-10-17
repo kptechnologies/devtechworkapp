@@ -438,6 +438,7 @@
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },
         { href: 'memos', icon: 'mail', text: 'Memos & requests', badge: 'memos' },
+        { href: 'ideas', icon: 'bulb', text: 'Ideas & plans', badge: 'ideas' },
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports', mobile: true },
         { href: 'lessons', icon: 'school', text: 'Lessons', badge: 'lessons' },
         { href: 'timetable', icon: 'calendar-time', text: 'Timetables' },
@@ -463,6 +464,7 @@
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'memos', icon: 'mail', text: 'Memos', badge: 'memos', mobile: true },
         { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },
+        { href: 'ideas', icon: 'bulb', text: 'Ideas & plans', badge: 'ideas' },
         ...money,
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports' },
         { href: 'issues', icon: 'layout-kanban', text: 'Issues board' },
@@ -495,6 +497,7 @@
       { href: 'queries', icon: 'alert-triangle', text: 'My queries', badge: 'queries' },
       { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },
       { href: 'memos', icon: 'mail', text: 'Notes & memos', badge: 'memos' },
+      { href: 'ideas', icon: 'bulb', text: 'Ideas & plans', badge: 'ideas' },
       { href: 'requests', icon: 'cash', text: 'Funding requests' },
       { href: 'profile', icon: 'user', text: 'Profile', mobile: true },
     ];
@@ -590,6 +593,7 @@
     if ('lessons' in p) App.badges.lessons = p.lessons;
     if ('memos' in p) App.badges.memos = p.memos;
     if ('notices' in p) App.badges.notices = p.notices;
+    if ('ideas' in p) App.badges.ideas = p.ideas;
     $$('[data-badge]').forEach((b) => {
       const n = App.badges[b.dataset.badge] || 0;
       b.textContent = n;
