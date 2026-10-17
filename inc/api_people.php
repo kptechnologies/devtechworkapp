@@ -45,6 +45,7 @@ function act_staff_profile(array $in, array $me): void
         'month' => attendance_month($uid, date('Y-m-01'), today()),
         'wallet' => is_admin($me) || $uid === $me['id'] ? wallet_stats($uid) : null,
         'queries' => person_queries($uid, null),
+        'suspension' => active_suspension($uid),
     ]);
 }
 
@@ -308,6 +309,31 @@ function work_days(): array
     return is_array($d) && $d ? array_values(array_map('intval', $d)) : [1, 2, 3, 4, 5];
 }
 
+/** Suspensions (from queries) per staff member that overlap a period: [uid => [[from, to], ...]]. Suspended days aren't absences. */
+function suspension_ranges(array $uids, string $from, string $to): array
+{
+    $uids = array_filter(array_map('intval', $uids));
+    if (!$uids) {
+        return [];
+    }
+    $out = [];
+    foreach (q("SELECT user_id, suspend_from, suspend_to FROM staff_queries WHERE status = 'suspended' AND user_id IN (" . implode(',', $uids) . ")
+                AND suspend_from <= ? AND suspend_to >= ? AND suspend_to >= suspend_from", [$to, $from])->fetchAll() as $r) {
+        $out[(int)$r['user_id']][] = [$r['suspend_from'], $r['suspend_to']];
+    }
+    return $out;
+}
+
+function is_suspended_on(array $ranges, string $date): bool
+{
+    foreach ($ranges as [$a, $b]) {
+        if ($date >= $a && $date <= $b) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Known sites: {name: [lat, lng]} from the clients directory, plus older Settings entries. */
 function site_coords(): array
 {
@@ -449,7 +475,8 @@ function act_attendance_today(array $in, array $me): void
     json_out(['ok' => true, 'record' => $visits ? $visits[count($visits) - 1] : null, 'open' => $open ? attendance_row($open) : null,
         'visits' => $visits, 'my_schools' => $me['schools'], 'sites' => $sites, 'site_radius' => SITE_RADIUS,
         'work_types' => work_types(), 'work_note_min' => WORK_NOTE_MIN, 'lessons' => lessons_today($me['id']), 'jobs_due' => jobs_due_for($me['id']),
-        'work_start' => work_start(), 'work_end' => work_end(), 'late_grace' => late_grace(), 'server_time' => time()]);
+        'work_start' => work_start(), 'work_end' => work_end(), 'late_grace' => late_grace(), 'server_time' => time(),
+        'suspension' => active_suspension($me['id'])]);
 }
 
 /** Rejects a clock-in/out with a code the app uses to retry or explain. */
@@ -466,6 +493,9 @@ function clock_fail(string $code, string $message, array $extra = []): void
 function act_clock(array $in, array $me): void
 {
     $action = ($in['action'] ?? '') === 'out' ? 'out' : 'in';
+    if ($action === 'in') {
+        refuse_if_suspended($me['id'], 'clock in');
+    }
     $now = time();
     $clientTs = is_numeric($in['client_ts'] ?? null) ? (float)$in['client_ts'] / 1000 : null;
     if ($clientTs === null) {
@@ -658,6 +688,7 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
     $staff = q("SELECT u.id, u.name, u.location, u.start_date, DATE(u.created_at) AS joined FROM users u WHERE $w ORDER BY u.name", $p)->fetchAll();
     $byUser = [];
     $ids = array_map('intval', array_column($staff, 'id'));
+    $suspended = suspension_ranges($ids, $from, $to);
     if ($ids) {
         $inIds = implode(',', $ids);
         foreach (q("SELECT * FROM attendance WHERE user_id IN ($inIds) AND work_date BETWEEN ? AND ? ORDER BY in_at", [$from, $to])->fetchAll() as $r) {
@@ -671,7 +702,7 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
     foreach ($staff as $s) {
         $sid = (int)$s['id'];
         $since = max($s['start_date'] ?: $s['joined'], $launch);
-        $st = ['working_days' => 0, 'present' => 0, 'extra_days' => 0, 'absent' => 0, 'late' => 0, 'late_min' => 0, 'early' => 0,
+        $st = ['working_days' => 0, 'present' => 0, 'extra_days' => 0, 'absent' => 0, 'suspended' => 0, 'late' => 0, 'late_min' => 0, 'early' => 0,
             'missed_out' => 0, 'minutes' => 0, 'arrivals' => []];
         foreach ($dates as $date) {
             $isWork = in_array((int)date('N', strtotime($date)), $workDays, true);
@@ -702,13 +733,17 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
                     'flags' => implode(',', array_unique(array_filter(explode(',', implode(',', array_column($recs, 'flags')))))),
                     'visits' => count($recs), 'locations' => array_values(array_unique(array_filter(array_column($recs, 'location_label'))))];
                 $day['status'] = $missed ? 'missed' : (!$isWork ? 'extra' : ($late ? 'late' : 'present'));
+            } elseif ($isWork && is_suspended_on($suspended[$sid] ?? [], $date)) {
+                // A suspension is served, not missed: it doesn't count against attendance.
+                $day['status'] = 'suspended';
+                $st['suspended'] += $date <= $end ? 1 : 0;
             } elseif ($isWork && $date <= $end && $date >= $since) {
                 $st['absent']++;
                 $day['status'] = 'absent';
             } elseif ($isWork) {
                 $day['status'] = $date > $end ? 'future' : 'before_start';
             }
-            if ($isWork && $date <= $end && $date >= $since) {
+            if ($isWork && $date <= $end && $date >= $since && $day['status'] !== 'suspended') {
                 $st['working_days']++;
             }
             if ($uid) {
@@ -809,6 +844,11 @@ function act_attendance_list(array $in, array $me): void
         $present = array_unique(array_column($rows, 'user_id'));
         $absent = array_values(array_filter(q("SELECT id, name, location FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') ORDER BY name")->fetchAll(),
             fn($u) => !in_array((int)$u['id'], array_map('intval', $present), true)));
+        $susp = suspension_ranges(array_column($absent, 'id'), $from, $from);
+        foreach ($absent as &$a) {
+            $a['suspended'] = isset($susp[(int)$a['id']]);
+        }
+        unset($a);
     }
     json_out(['ok' => true, 'from' => $from, 'to' => $to, 'work_start' => work_start(), 'items' => $rows, 'absent' => $absent]);
 }

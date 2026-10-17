@@ -454,6 +454,8 @@ img.avatar { object-fit: cover; padding: 0; }
 .st-late { background: var(--out-soft); border-color: transparent; }
 .st-missed, .st-absent { background: var(--bad-soft); border-color: transparent; }
 .st-absent .cal-t, .st-missed .cal-t { color: var(--bad); }
+.st-suspended { background: repeating-linear-gradient(135deg, var(--bad-soft) 0 6px, transparent 6px 12px); border-color: transparent; }
+.st-suspended .cal-t { color: var(--bad); }
 .st-off, .st-future, .st-before_start { opacity: .55; }
 .cal-key { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); }
 @media (max-width: 420px) { .cal-cell { min-height: 44px; padding: 3px; } .cal-t { font-size: 10px; } }

@@ -114,9 +114,11 @@ function act_users_list(array $in, array $me): void
                (SELECT COUNT(*) FROM reports r WHERE r.user_id = u.id) AS reports,
                (SELECT COALESCE(SUM(effect),0) FROM wallet_txns w WHERE w.user_id = u.id AND w.status <> 'rejected') AS balance
                FROM users u ORDER BY u.active DESC, u.role, u.name")->fetchAll();
+    $susp = suspension_ranges(array_column($rows, 'id'), today(), today());
     foreach ($rows as &$r) {
         $r['id'] = (int)$r['id'];
         $r['active'] = (int)$r['active'];
+        $r['suspended_until'] = isset($susp[$r['id']]) ? max(array_column($susp[$r['id']], 1)) : null;
         $r['has_password'] = (bool)$r['has_password'];
         $r['schools'] = user_schools($r);
         $r['balance'] = round((float)$r['balance'], 2);

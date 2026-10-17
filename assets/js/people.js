@@ -353,6 +353,9 @@
         box.innerHTML = `<div class="clock-card on"><div><div class="small muted">At ${esc(open.location_label || 'work')} since ${esc(timeOf(open.in_at))}${visits[0]?.late ? ' <span class="pill out">Late</span>' : ''}</div>
           <div class="clock-time">${hrs(mins)}</div><div class="small muted">Work ends ${esc(r.work_end)}</div>${list}</div>
           <button class="btn danger solid" data-clock="out"><i class="ti ti-logout"></i>Clock out here</button></div>`;
+      } else if (r.suspension) {
+        box.innerHTML = `<div class="clock-card"><div><div style="font-weight:600;color:var(--bad)"><i class="ti ti-user-off"></i> You are suspended until ${esc(fmtDate(r.suspension.to))}</div>
+          <div class="small muted">You can't clock in or work on job orders until then. See <a href="#/queries/${r.suspension.id}">${esc(r.suspension.ref)}</a>.</div></div></div>`;
       } else if (visits.length) {
         const total = done.reduce((a, v) => a + (v.minutes || 0), 0);
         box.innerHTML = `<div class="clock-card done"><div><div class="small muted">Today · ${visits.length} location${visits.length === 1 ? '' : 's'} · ${hrs(total)} on site</div>
@@ -420,7 +423,7 @@
           ${kpi('Hours logged', Math.round(totalMin / 6) / 10, 'Completed clock-outs', 'hourglass', 'tone-in')}
         </div>
         ${admin && single && r.absent.length ? `<div class="card card-pad" style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="muted small"><i class="ti ti-user-off"></i> Not clocked in:</span>${r.absent.map((s) => `<button class="pill bad" data-add="${s.id}" title="Add manually">${esc(s.name)}</button>`).join('')}</div>` : ''}
+          <span class="muted small"><i class="ti ti-user-off"></i> Not clocked in:</span>${r.absent.map((s) => s.suspended ? `<span class="pill" title="Suspended">${esc(s.name)} · suspended</span>` : `<button class="pill bad" data-add="${s.id}" title="Add manually">${esc(s.name)}</button>`).join('')}</div>` : ''}
         <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Location / work done</th><th>Selfies</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
           ${r.items.map((x) => `<tr>${single ? '' : `<td class="num">${esc(fmtDate(x.work_date, false))}</td>`}${admin ? `<td><a href="#/staff/${x.user_id}">${esc(x.user_name)}</a></td>` : ''}
             <td class="num">${esc(timeOf(x.in_at))} ${x.late && firstIns[x.user_id + x.work_date] === x ? `<span class="pill out">Late ${x.late_min}m</span>` : ''}</td>
@@ -504,7 +507,7 @@
       ${kpi('Hours worked', x.hours, `${x.avg_hours}h a day on average`, 'hourglass', 'tone-info')}</div>`;
   }
 
-  const DAY_STATUS = { present: ['On time', 'in'], extra: ['Day off worked', 'in'], late: ['Late', 'out'], missed: ['No clock-out', 'bad'], absent: ['Absent', 'bad'], off: ['Day off', ''], future: ['', ''], before_start: ['Not started', ''] };
+  const DAY_STATUS = { present: ['On time', 'in'], extra: ['Day off worked', 'in'], late: ['Late', 'out'], missed: ['No clock-out', 'bad'], absent: ['Absent', 'bad'], suspended: ['Suspended', 'bad'], off: ['Day off', ''], future: ['', ''], before_start: ['Not started', ''] };
   function calendarHtml(days) {
     if (!days.length) return '';
     const lead = (Number(new Date(days[0].date + 'T00:00:00').getDay()) + 6) % 7; // Monday first
@@ -512,11 +515,11 @@
       const [label] = DAY_STATUS[d.status] || ['', ''];
       const tip = [fmtDate(d.date), label, d.in ? `${timeOf(d.in)} – ${d.out ? timeOf(d.out) : '?'}` : '', d.late ? `${d.late_min} min late` : '', d.in_reason, d.out_reason].filter(Boolean).join('\n');
       return `<div class="cal-cell st-${d.status}" title="${esc(tip)}"><div class="cal-d">${+d.date.slice(8)}</div>
-        ${d.in ? `<div class="cal-t">${esc(timeOf(d.in))}</div>` : d.status === 'absent' ? '<div class="cal-t">Absent</div>' : ''}
+        ${d.in ? `<div class="cal-t">${esc(timeOf(d.in))}</div>` : d.status === 'absent' ? '<div class="cal-t">Absent</div>' : d.status === 'suspended' ? '<div class="cal-t">Susp.</div>' : ''}
         ${d.late ? `<div class="cal-t">+${d.late_min}m</div>` : ''}${d.status === 'missed' ? '<div class="cal-t">No out</div>' : d.early ? '<div class="cal-t">Early</div>' : ''}</div>`;
     }));
     return `<div class="cal-head">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div>${d}</div>`).join('')}</div><div class="cal">${cells.join('')}</div>
-      <div class="chips" style="margin-top:10px">${['present', 'late', 'missed', 'absent', 'extra', 'off'].map((s) => `<span class="cal-key st-${s}">${DAY_STATUS[s][0]}</span>`).join('')}</div>`;
+      <div class="chips" style="margin-top:10px">${['present', 'late', 'missed', 'absent', 'suspended', 'extra', 'off'].filter((s) => s !== 'suspended' || days.some((d) => d.status === s)).map((s) => `<span class="cal-key st-${s}">${DAY_STATUS[s][0]}</span>`).join('')}</div>`;
   }
   App.attendanceCalendar = calendarHtml;
 
@@ -705,7 +708,8 @@
             <div class="small muted" style="margin-top:4px">${esc(u.email)}${u.phone ? ` · <a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : ''}</div>
             ${u.duties.length ? `<div class="chips" style="margin-top:8px">${u.duties.map((d) => `<span class="pill brand">${esc(d)}</span>`).join('')}</div>` : ''}</div>
           <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
-            ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}</div>
+            ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}
+            ${p.suspension ? `<a class="pill bad" href="#/queries/${p.suspension.id}">Suspended until ${esc(fmtDate(p.suspension.to, false))}</a>` : ''}</div>
         </div>
         ${self ? '<div id="pf-alerts"></div>' : ''}
         <div class="grid g4" style="margin-bottom:14px">
