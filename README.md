@@ -33,7 +33,7 @@ A self-hosted web app for daily work reports, job orders, staff attendance, work
 5. **Staff profiles**: open each person from **Staff setup** and tick their usual **Responsibilities** (e.g. Installation, Maintenance & repair). Their daily report starts with these ticked.
 6. **Attendance**: in **Settings → Attendance**, set work start and end times, the grace period and working days. Then open each school under **Clients** and set its GPS point (press *Use my current location* while standing there) so clock-ins show the nearest school.
 7. **Reminders**: in **Settings → Follow-up reminders**, choose the send time and any extra addresses (e.g. an operations inbox), then press **Send digest now** to check it arrives.
-8. **Work tools**: add your laptops, toolkits and testers under **Work tools** and issue them to staff.
+8. **Work tools**: add your laptops, toolkits and testers under **Work tools** and issue them to staff. Laptops need their brand, model, serial number, RAM, storage and a photo on record before they can be issued. Staff report problems from **Profile → Tools**; management sends items for repair and records the repairer, cost and outcome.
 
 ## Updating an existing install
 

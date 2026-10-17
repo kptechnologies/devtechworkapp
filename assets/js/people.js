@@ -557,78 +557,143 @@
   }
 
   /* ------------------------------------------------------------- tools */
-  const COND = { good: ['Good', 'in'], fair: ['Fair', 'info'], faulty: ['Faulty', 'out'], lost: ['Lost', 'bad'], retired: ['Retired', ''] };
+  const COND = { good: ['Good', 'in'], fair: ['Fair', 'info'], faulty: ['Has issues', 'out'], repair: ['At repair', 'bad'], lost: ['Lost', 'bad'], retired: ['Retired', ''] };
   const condPill = (c) => `<span class="pill ${COND[c]?.[1] || ''}">${esc(COND[c]?.[0] || c)}</span>`;
+  const REPAIR = { open: ['Issue reported', 'out'], at_repair: ['At repair', 'bad'], fixed: ['Fixed', 'in'], unfixable: ['Not fixable', 'bad'] };
+  const repairPill = (s) => (s && REPAIR[s] ? `<span class="pill ${REPAIR[s][1]}">${REPAIR[s][0]}</span>` : '');
+  const ACCESSORIES = ['Charger', 'Bag', 'Mouse', 'Power cable', 'Case', 'Manual'];
+  const isComputer = (cat) => /laptop|desktop|computer|tablet|pc\b/i.test(cat || '');
+  const toolThumb = (x) => `<div class="tool-thumb">${x.photo_id ? `<img src="file.php?id=${x.photo_id}&thumb=1" alt="" loading="lazy">` : `<i class="ti ti-${isComputer(x.category) ? 'device-laptop' : 'tools'}"></i>`}</div>`;
+  const specLine = (x) => [[x.brand, x.model].filter(Boolean).join(' '), x.processor, x.ram && x.ram + ' RAM', x.storage].filter(Boolean).join(' · ');
+  // What a laptop needs on record before it goes to staff (the server checks this too).
+  const laptopMissing = (t) => {
+    if (!t.laptop) return [];
+    const need = [['brand', 'brand'], ['model', 'model'], ['serial_no', 'serial number'], ['ram', 'RAM'], ['storage', 'storage']].filter(([k]) => !String(t[k] || '').trim()).map(([, l]) => l);
+    if (!(t.files || []).some((f) => /^image\//.test(f.mime))) need.push('a photo');
+    return need;
+  };
 
   App.route('tools', async (ctx) => {
     const staff = (await api('users_list')).items.filter((u) => u.active);
-    const st = { q: '', holder: '', condition: '' };
+    const st = { q: '', holder: '', condition: '', category: '' };
     ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>Work tools</h1><p class="muted">Every tool, who holds it, and its condition.</p></div>
-        <div class="actions"><button class="btn primary" id="tl-add"><i class="ti ti-plus"></i>Add tool</button></div></div>
+      <div class="page-head"><div><h1>Work tools</h1><p class="muted">Every laptop and tool, who holds it, its specs, condition and repairs.</p></div>
+        <div class="actions"><a class="btn" id="tl-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn primary" id="tl-add"><i class="ti ti-plus"></i>Add tool</button></div></div>
       <div id="tl-kpi"></div>
-      <div class="filters" id="tl-filters"><input type="search" name="q" placeholder="Search name, tag, serial…">
+      <div class="filters" id="tl-filters"><input type="search" name="q" placeholder="Search name, brand, model, tag, serial…">
+        <select name="category" id="tl-cat"><option value="">All categories</option></select>
         <select name="holder">${App.opts([['store', 'In store']].concat(staff.map((s) => [s.id, s.name])), '', { placeholder: 'Anyone' })}</select>
-        <select name="condition">${App.opts(Object.entries(COND).map(([k, [l]]) => [k, l]), '', { placeholder: 'Any condition' })}</select></div>
+        <select name="condition">${App.opts([['issues', 'Has issues or at repair']].concat(Object.entries(COND).map(([k, [l]]) => [k, l])), '', { placeholder: 'Any condition' })}</select></div>
+      <div id="tl-holders"></div>
       <div class="card" id="tl-list">${App.loading()}</div>`;
     let cats = [];
+    const filters = $('#tl-filters', ctx.el);
     const load = async () => {
       const r = await api('tools_list', { query: st });
       cats = r.categories;
+      const catSel = $('#tl-cat', ctx.el);
+      catSel.innerHTML = `<option value="">All categories</option>${cats.map((c) => `<option value="${esc(c)}" ${c === st.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}`;
+      $('#tl-export', ctx.el).href = 'api.php?action=tools_export&' + new URLSearchParams(Object.entries(st).filter(([, v]) => v)).toString();
       const t = r.totals;
+      const issues = (+t.faulty || 0) + (+t.repair || 0);
       $('#tl-kpi', ctx.el).innerHTML = `<div class="grid g4" style="margin-bottom:14px">
-        <div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-tools"></i></div><div class="label">Tools in use</div><div class="value">${+t.n || 0}</div><div class="sub">Not retired</div></div>
-        <div class="card kpi"><div class="kpi-icon tone-info"><i class="ti ti-user-check"></i></div><div class="label">Issued to staff</div><div class="value">${+t.issued || 0}</div><div class="sub">${(+t.n || 0) - (+t.issued || 0)} in store</div></div>
-        <div class="card kpi"><div class="kpi-icon ${+t.problems ? 'tone-bad' : 'tone-in'}"><i class="ti ti-alert-triangle"></i></div><div class="label">Faulty or lost</div><div class="value">${+t.problems || 0}</div><div class="sub">Need attention</div></div>
+        <div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-tools"></i></div><div class="label">Tools in use</div><div class="value">${+t.n || 0}</div><div class="sub">${+t.issued || 0} issued · ${(+t.n || 0) - (+t.issued || 0)} in store</div></div>
+        <div class="card kpi"><div class="kpi-icon tone-info"><i class="ti ti-device-laptop"></i></div><div class="label">Laptops</div><div class="value">${+t.laptops || 0}</div><div class="sub">Not retired</div></div>
+        <div class="card kpi click" id="tl-k-issues"><div class="kpi-icon ${issues ? 'tone-bad' : 'tone-in'}"><i class="ti ti-tool"></i></div><div class="label">Issues &amp; repairs</div><div class="value">${issues}</div><div class="sub">${+t.faulty || 0} with issues · ${+t.repair || 0} at repair${+t.lost ? ` · ${+t.lost} lost` : ''}</div></div>
         <div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-cash"></i></div><div class="label">Total value</div><div class="value">${money(t.value, { short: true })}</div><div class="sub">Purchase value</div></div></div>`;
+      $('#tl-k-issues', ctx.el).addEventListener('click', () => { st.condition = 'issues'; $('[name=condition]', filters).value = 'issues'; load().catch(App.fail); });
+      $('#tl-holders', ctx.el).innerHTML = r.by_holder.length ? `<div class="card card-pad" style="margin-bottom:14px"><div class="label" style="margin-bottom:8px">Who holds what</div>
+        <div class="chips">${r.by_holder.map((h) => `<button class="pill ${String(h.id) === String(st.holder) ? 'brand' : ''}" data-holder="${h.id}" style="cursor:pointer;border:0">
+          <i class="ti ti-user"></i>${esc(h.name)} · ${+h.laptops ? `${+h.laptops} laptop${+h.laptops > 1 ? 's' : ''}` : ''}${+h.laptops && +h.n > +h.laptops ? ' + ' : ''}${+h.n > +h.laptops ? `${+h.n - +h.laptops} other` : ''}${+h.faulty ? ` · <span style="color:var(--bad)">${+h.faulty} with issues</span>` : ''}</button>`).join('')}</div></div>` : '';
+      $$('[data-holder]', ctx.el).forEach((b) => b.addEventListener('click', () => {
+        st.holder = String(st.holder) === b.dataset.holder ? '' : b.dataset.holder;
+        $('[name=holder]', filters).value = st.holder;
+        load().catch(App.fail);
+      }));
       const box = $('#tl-list', ctx.el);
       if (!r.items.length) { box.innerHTML = App.empty('tools', 'No tools found', 'Add laptops, toolkits, testers and other equipment so you can track who holds them.'); return; }
-      box.innerHTML = `<div class="table-wrap"><table class="tbl"><thead><tr><th>Tool</th><th class="hide-sm">Tag</th><th class="hide-sm">Serial no.</th><th>Condition</th><th>Held by</th><th class="r hide-sm">Value</th></tr></thead><tbody>
-        ${r.items.map((x) => `<tr class="click" data-tool="${x.id}"><td><div style="font-weight:500">${esc(x.name)}</div><div class="faint small">${esc(x.category)}</div></td>
-          <td class="hide-sm num">${esc(x.tag_code)}</td><td class="hide-sm num small">${esc(x.serial_no)}</td><td>${condPill(x.condition)}</td>
-          <td>${x.holder_name ? `${esc(x.holder_name)}<div class="faint small">since ${esc(fmtDate(x.issued_at, false))}</div>` : '<span class="faint">In store</span>'}</td>
+      box.innerHTML = `<div class="table-wrap"><table class="tbl"><thead><tr><th style="width:52px"></th><th>Tool</th><th class="hide-sm">Specs</th><th class="hide-sm">Tag / serial</th><th>Condition</th><th>Held by</th><th class="r hide-sm">Value</th></tr></thead><tbody>
+        ${r.items.map((x) => `<tr class="click" data-tool="${x.id}"><td>${toolThumb(x)}</td>
+          <td><div style="font-weight:500">${esc(x.name)}</div><div class="faint small">${esc([x.category, [x.brand, x.model].filter(Boolean).join(' ')].filter(Boolean).join(' · '))}</div></td>
+          <td class="hide-sm small">${esc([x.processor, x.ram && x.ram + ' RAM', x.storage].filter(Boolean).join(' · '))}</td>
+          <td class="hide-sm num small">${esc(x.tag_code)}${x.serial_no ? `<div class="faint">${esc(x.serial_no)}</div>` : ''}</td>
+          <td><div style="display:flex;gap:4px;flex-wrap:wrap">${condPill(x.condition)}${x.repair_status === 'open' && x.condition !== 'faulty' ? repairPill('open') : ''}</div></td>
+          <td>${x.holder_name ? `${esc(x.holder_name)}<div class="faint small">since ${esc(fmtDate(x.issued_at, false))}</div>` : `<span class="faint">${x.condition === 'repair' ? 'With repairer' : 'In store'}</span>`}</td>
           <td class="r num hide-sm">${+x.value ? money(x.value, { short: true }) : ''}</td></tr>`).join('')}</tbody></table></div>`;
       $$('[data-tool]', box).forEach((row) => row.addEventListener('click', () => openTool(+row.dataset.tool, staff, () => load())));
     };
-    $('#tl-filters', ctx.el).addEventListener('input', App.debounce((e) => { if (e.target.name) { st[e.target.name] = e.target.value; load().catch(App.fail); } }, 300));
+    filters.addEventListener('input', App.debounce((e) => { if (e.target.name) { st[e.target.name] = e.target.value; load().catch(App.fail); } }, 300));
     $('#tl-add', ctx.el).addEventListener('click', () => editTool(null, cats, () => load()));
     ctx.refresh = () => load().catch(() => {});
     await load();
   }, { title: 'Work tools', manager: true, live: true });
 
+  const MOVE_ICON = { issue: ['tone-brand', 'arrow-up-right'], return: ['tone-in', 'arrow-down-left'], problem: ['tone-bad', 'alert-triangle'], repair: ['tone-bad', 'tool'], repaired: ['tone-in', 'circle-check'] };
+  const moveText = (m) => ({
+    issue: () => 'Issued to ' + esc(m.user_name),
+    return: () => 'Returned by ' + esc(m.user_name || '—'),
+    problem: () => 'Issue reported',
+    repair: () => 'Sent for repair',
+    repaired: () => 'Back from repair',
+  }[m.action] || (() => 'Condition: ' + esc(COND[m.condition]?.[0] || m.condition)))();
+
   async function openTool(id, staff, done) {
+    const mgmt = isManagement();
     const el = App.drawer('Tool', App.loading());
     const render = async () => {
       let t;
       try { t = (await api('tool_get', { query: { id } })).tool; } catch (e) { App.closeTop(); App.fail(e); return; }
+      const open = t.repairs.find((r) => ['open', 'at_repair'].includes(r.status));
+      const missing = laptopMissing(t);
+      const kv = [['Category', t.category], ['Brand', t.brand], ['Model', t.model], ['Serial no.', t.serial_no], ['Tag', t.tag_code], ['Processor', t.processor],
+        ['RAM', t.ram], ['Storage', t.storage], ['OS', t.os], ['Screen', t.screen], ['Accessories', t.accessories]].filter(([, v]) => v);
+      const money2 = [['Value', +t.value ? money(t.value) : ''], ['Bought', t.purchase_date ? fmtDate(t.purchase_date) : ''], ['Supplier', t.supplier],
+        ['Warranty until', t.warranty_until ? fmtDate(t.warranty_until) : ''], ['Issued', t.holder_name ? fmtDateTime(t.issued_at) : '']].filter(([, v]) => v);
+      const repairCost = t.repairs.reduce((s, r) => s + (+r.cost || 0), 0);
       $('.drawer-head h2', el).textContent = t.name;
       $('.drawer-body', el).innerHTML = `
-        <div style="display:flex;gap:6px;margin-bottom:12px">${condPill(t.condition)}${t.holder_name ? `<span class="pill brand"><i class="ti ti-user"></i>${esc(t.holder_name)}</span>` : '<span class="pill">In store</span>'}</div>
-        <dl class="kv">${t.category ? `<dt>Category</dt><dd>${esc(t.category)}</dd>` : ''}${t.tag_code ? `<dt>Tag</dt><dd>${esc(t.tag_code)}</dd>` : ''}
-          ${t.serial_no ? `<dt>Serial no.</dt><dd>${esc(t.serial_no)}</dd>` : ''}${+t.value ? `<dt>Value</dt><dd>${money(t.value)}</dd>` : ''}
-          ${t.purchase_date ? `<dt>Bought</dt><dd>${esc(fmtDate(t.purchase_date))}</dd>` : ''}${t.holder_name ? `<dt>Issued</dt><dd>${esc(fmtDateTime(t.issued_at))}</dd>` : ''}</dl>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${condPill(t.condition)}${t.holder_name ? `<span class="pill brand"><i class="ti ti-user"></i>${esc(t.holder_name)}</span>` : `<span class="pill">${t.condition === 'repair' ? 'With repairer' : 'In store'}</span>`}</div>
+        ${open ? `<div class="card card-pad" style="margin-bottom:12px;background:var(--${open.status === 'at_repair' ? 'bad' : 'out'}-soft);border:0">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:4px"><strong>${open.status === 'at_repair' ? 'At repair' : 'Issue reported'}</strong>${repairPill(open.status)}</div>
+          <div style="white-space:pre-wrap">${esc(open.issue || '')}</div>
+          <div class="faint small" style="margin-top:4px">Reported ${esc(fmtDateTime(open.reported_at))}${open.reported_by_name ? ' by ' + esc(open.reported_by_name) : ''}${open.holder_name ? ' · was with ' + esc(open.holder_name) : ''}</div>
+          ${open.status === 'at_repair' ? `<div class="small" style="margin-top:6px">With <strong>${esc(open.repairer)}</strong>${open.repairer_phone ? ` · <a href="tel:${esc(open.repairer_phone)}">${esc(open.repairer_phone)}</a>` : ''} · sent ${esc(fmtDate(open.sent_at))}${open.expected_at ? ` · expected back ${esc(fmtDate(open.expected_at))}` : ''}</div>` : ''}</div>` : ''}
+        ${mgmt && missing.length && !t.holder_id ? `<div class="card card-pad" style="margin-bottom:12px;background:var(--out-soft);border:0"><i class="ti ti-info-circle"></i> Before issuing this laptop, record its ${esc(missing.join(', '))}.</div>` : ''}
+        <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}${mgmt ? money2.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('') : ''}</dl>
         ${t.notes ? `<p style="white-space:pre-wrap;margin-top:8px">${esc(t.notes)}</p>` : ''}
-        <div class="sec-title">Photos</div><div id="td-files">${App.gallery(t.files, { removable: true })}</div>
+        <div class="sec-title">Photos</div><div id="td-files">${App.gallery(t.files, { removable: mgmt })}</div>
+        <div class="sec-title">Repairs &amp; issues${t.repairs.length ? ` <span class="faint small">· ${t.repairs.length}${mgmt && repairCost ? ' · ' + money(repairCost) + ' spent' : ''}</span>` : ''}</div>
+        ${t.repairs.length ? `<ul class="list">${t.repairs.map((r) => `<li class="li" style="padding:8px 0;align-items:flex-start"><div class="li-icon ${['fixed'].includes(r.status) ? 'tone-in' : 'tone-bad'}"><i class="ti ti-tool"></i></div>
+          <div class="main-col"><div class="t" style="white-space:normal">${esc(r.issue || 'No description')}</div>
+          <div class="s" style="white-space:normal">${esc(fmtDate(r.reported_at, false))}${r.holder_name ? ' · with ' + esc(r.holder_name) : ''}${r.repairer ? ' · repairer ' + esc(r.repairer) : ''}${r.returned_at ? ' · back ' + esc(fmtDate(r.returned_at, false)) : ''}${mgmt && +r.cost ? ' · ' + money(r.cost) : ''}${r.resolution ? ' · ' + esc(r.resolution) : ''}</div></div>
+          ${repairPill(r.status)}</li>`).join('')}</ul>` : '<p class="faint small">No issues reported.</p>'}
         <div class="sec-title">History</div>
-        ${t.moves.length ? `<ul class="list">${t.moves.map((m) => `<li class="li" style="padding:8px 0"><div class="li-icon ${m.action === 'issue' ? 'tone-brand' : m.action === 'return' ? 'tone-in' : 'tone-out'}">
-          <i class="ti ti-${m.action === 'issue' ? 'arrow-up-right' : m.action === 'return' ? 'arrow-down-left' : 'adjustments'}"></i></div>
-          <div class="main-col"><div class="t">${m.action === 'issue' ? 'Issued to ' + esc(m.user_name) : m.action === 'return' ? 'Returned by ' + esc(m.user_name || '—') : 'Condition: ' + esc(COND[m.condition]?.[0] || m.condition)}</div>
-          <div class="s">${esc(fmtDateTime(m.created_at))}${m.by_name ? ' · by ' + esc(m.by_name) : ''}${m.note ? ' · ' + esc(m.note) : ''}</div></div>
-          ${m.action === 'return' && m.condition ? condPill(m.condition) : ''}</li>`).join('')}</ul>` : '<p class="faint small">Not issued yet.</p>'}`;
+        ${t.moves.length ? `<ul class="list">${t.moves.map((m) => { const [tone, icon] = MOVE_ICON[m.action] || ['tone-out', 'adjustments']; return `<li class="li" style="padding:8px 0"><div class="li-icon ${tone}"><i class="ti ti-${icon}"></i></div>
+          <div class="main-col"><div class="t">${moveText(m)}</div>
+          <div class="s" style="white-space:normal">${esc(fmtDateTime(m.created_at))}${m.by_name ? ' · by ' + esc(m.by_name) : ''}${m.items ? ' · with ' + esc(m.items) : ''}${m.note ? ' · ' + esc(m.note) : ''}</div></div>
+          ${m.action === 'return' && m.condition ? condPill(m.condition) : ''}</li>`; }).join('')}</ul>` : '<p class="faint small">Not issued yet.</p>'}`;
       App.bindGallery($('#td-files', el));
       let foot = $('.drawer-foot', el);
       if (!foot) { foot = document.createElement('div'); foot.className = 'drawer-foot'; el.appendChild(foot); }
-      foot.innerHTML = `${isAdmin() ? '<button class="btn danger" data-a="delete"><i class="ti ti-trash"></i></button>' : ''}<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>
+      const canIssue = !['lost', 'retired', 'repair'].includes(t.condition);
+      foot.innerHTML = mgmt ? `${isAdmin() ? '<button class="btn danger" data-a="delete"><i class="ti ti-trash"></i></button>' : ''}<button class="btn ghost" data-a="edit"><i class="ti ti-edit"></i>Edit</button>
+        ${!open ? '<button class="btn ghost" data-a="report"><i class="ti ti-alert-triangle"></i>Report issue</button>' : ''}
+        ${!open || open.status === 'open' ? '<button class="btn" data-a="repair"><i class="ti ti-tool"></i>Send for repair</button>' : ''}
+        ${open ? `<button class="btn" data-a="close"><i class="ti ti-circle-check"></i>${open.status === 'at_repair' ? 'Back from repair' : 'Close issue'}</button>` : ''}
         ${t.holder_id ? '<button class="btn" data-a="return"><i class="ti ti-arrow-down-left"></i>Return to store</button>' : ''}
-        ${['lost', 'retired'].includes(t.condition) ? '' : `<button class="btn primary" data-a="issue"><i class="ti ti-arrow-up-right"></i>${t.holder_id ? 'Reissue' : 'Issue to staff'}</button>`}`;
+        ${canIssue ? `<button class="btn primary" data-a="issue"><i class="ti ti-arrow-up-right"></i>${t.holder_id ? 'Reissue' : 'Issue to staff'}</button>` : ''}`
+        : (!open ? '<button class="btn primary" data-a="report"><i class="ti ti-alert-triangle"></i>Report an issue</button>' : '<span class="faint small">Management has been told about this issue.</span>');
       $$('[data-a]', foot).forEach((b) => b.addEventListener('click', async () => {
         const a = b.dataset.a;
         const after = () => { render(); done && done(); };
         if (a === 'edit') editTool(t, [], after);
         else if (a === 'issue') issueTool(t, staff, after);
         else if (a === 'return') returnTool(t, after);
+        else if (a === 'report') reportIssue(t, after);
+        else if (a === 'repair') sendRepair(t, open, after);
+        else if (a === 'close') closeRepair(t, open, after);
         else if (a === 'delete') {
-          if (!(await App.confirm('Delete this tool?', 'Its history and photos will be permanently removed. To keep the record, mark it Retired instead.', { ok: 'Delete', danger: true }))) return;
+          if (!(await App.confirm('Delete this tool?', 'Its history, repairs and photos will be permanently removed. To keep the record, mark it Retired instead.', { ok: 'Delete', danger: true }))) return;
           try { await api('tool_delete', { data: { id: t.id } }); App.closeAll(); toast('Tool deleted'); done && done(); } catch (e) { App.fail(e); }
         }
       }));
@@ -637,14 +702,27 @@
   }
   App.openTool = openTool;
 
+  /** Tick boxes for the accessories a tool comes with, plus the usual ones. */
+  const accessoryOpts = (t, name) => {
+    const own = String(t.accessories || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const list = own.concat(ACCESSORIES.filter((a) => !own.some((o) => o.toLowerCase() === a.toLowerCase())));
+    return `<div class="opts">${list.map((a) => `<label class="opt"><input type="checkbox" data-multi="1" name="${name}" value="${esc(a)}" ${own.includes(a) ? 'checked' : ''}><span>${esc(a)}</span></label>`).join('')}</div>`;
+  };
+
   function issueTool(t, staff, done) {
+    const missing = laptopMissing(t);
+    if (missing.length) { toast(`Record this laptop's ${missing.join(', ')} before issuing it. Press Edit to add them.`, true); return; }
     const el = App.modal(`Issue ${esc(t.name)}`, `<form id="ti-form">
+      ${specLine(t) || t.serial_no ? `<div class="card card-pad" style="margin-bottom:12px"><div style="font-weight:500">${esc(specLine(t) || t.name)}</div><div class="faint small">${esc([t.tag_code && 'Tag ' + t.tag_code, t.serial_no && 'S/N ' + t.serial_no].filter(Boolean).join(' · '))}</div></div>` : ''}
       <div class="field"><label>Give to</label><select name="user_id">${App.opts(staff.map((s) => [s.id, s.name]), t.holder_id || '', { placeholder: 'Choose staff…' })}</select></div>
-      <div class="field"><label>Note</label><input name="note" placeholder="e.g. For the Mayday installation this week"></div></form>`,
+      <div class="field"><div class="label">Handed over with</div>${accessoryOpts(t, 'items')}</div>
+      <div class="field"><label>Note</label><input name="note" placeholder="e.g. For the Mayday installation this week"></div>
+      <label class="check-row"><input type="checkbox" name="checked"><span>I checked it powers on and works, and the details above match the item.</span></label></form>`,
     '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ti-ok">Issue</button>');
     $('#ti-ok', el).addEventListener('click', async (e) => {
       const d = App.formData($('#ti-form', el));
       if (!d.user_id) { toast('Choose a staff member.', true); return; }
+      if (!d.checked) { toast('Check the item works before issuing it.', true); return; }
       try { await App.busy(e.currentTarget, () => api('tool_issue', { data: { id: t.id, ...d } })); App.closeTop(); toast('Tool issued'); done(); } catch (err) { App.fail(err); }
     });
   }
@@ -652,8 +730,9 @@
   function returnTool(t, done) {
     const el = App.modal(`Return ${esc(t.name)}`, `<form id="tr-form">
       <p class="muted" style="margin-bottom:12px">From ${esc(t.holder_name)}. Check it before taking it back.</p>
-      <div class="field"><div class="label">Condition on return</div><div class="opts">${Object.entries(COND).filter(([k]) => k !== 'retired').map(([k, [l]]) =>
+      <div class="field"><div class="label">Condition on return</div><div class="opts">${Object.entries(COND).filter(([k]) => !['retired', 'repair'].includes(k)).map(([k, [l]]) =>
         `<label class="opt"><input type="radio" name="condition" value="${k}" ${k === t.condition ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+      <div class="field"><div class="label">Returned with</div>${accessoryOpts(t, 'items')}</div>
       <div class="field"><label>Note</label><input name="note" placeholder="e.g. Charger missing"></div></form>`,
     '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="tr-ok">Return to store</button>');
     $('#tr-ok', el).addEventListener('click', async (e) => {
@@ -661,22 +740,92 @@
     });
   }
 
+  function reportIssue(t, done) {
+    const el = App.modal(`Report an issue · ${esc(t.name)}`, `<form id="tq-form" novalidate>
+      <div class="field"><label>What's wrong? <span class="req">*</span></label><textarea name="issue" rows="3" placeholder="e.g. Battery drains in 30 minutes; keyboard 'E' key not working"></textarea></div>
+      <div class="field"><div class="label">Photos (optional)</div><div id="tq-up"></div></div></form>`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="tq-ok">Report</button>');
+    const up = App.uploader($('#tq-up', el), { existing: t.files?.length || 0, label: 'Add photo' });
+    $('#tq-ok', el).addEventListener('click', async (e) => {
+      const form = $('#tq-form', el);
+      try { await App.busy(e.currentTarget, () => api('tool_report_issue', { data: { id: t.id, ...App.formData(form) }, files: up.files() })); App.closeTop(); toast('Issue reported'); done(); } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+    });
+  }
+
+  function sendRepair(t, open, done) {
+    const el = App.modal(`Send ${esc(t.name)} for repair`, `<form id="tp-form" novalidate>
+      ${t.holder_name ? `<p class="muted" style="margin-bottom:12px">It will be taken back from ${esc(t.holder_name)}.</p>` : ''}
+      ${open ? `<div class="card card-pad" style="margin-bottom:12px"><div class="label">Reported issue</div><div style="white-space:pre-wrap">${esc(open.issue || '')}</div></div>` : ''}
+      <div class="field"><label>${open ? 'Anything to add' : 'What\'s wrong? <span class="req">*</span>'}</label><textarea name="issue" rows="2"></textarea></div>
+      <div class="form-row"><div class="field"><label>Repairer / shop <span class="req">*</span></label><input name="repairer" placeholder="e.g. Computer Village – Tunde"></div>
+        <div class="field"><label>Repairer phone</label><input name="repairer_phone" type="tel"></div></div>
+      <div class="form-row"><div class="field"><label>Date sent</label><input type="date" name="sent_at" value="${esc(App.cfg.today)}"></div>
+        <div class="field"><label>Expected back</label><input type="date" name="expected_at"></div></div></form>`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="tp-ok">Send for repair</button>');
+    $('#tp-ok', el).addEventListener('click', async (e) => {
+      const form = $('#tp-form', el);
+      try { await App.busy(e.currentTarget, () => api('tool_repair_send', { data: { id: t.id, ...App.formData(form) } })); App.closeTop(); toast('Marked as at repair'); done(); } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+    });
+  }
+
+  function closeRepair(t, open, done) {
+    const atRepair = open.status === 'at_repair';
+    const el = App.modal(atRepair ? `${esc(t.name)} back from repair` : `Close issue · ${esc(t.name)}`, `<form id="tc-form" novalidate>
+      <div class="field"><div class="label">Outcome</div><div class="opts"><label class="opt"><input type="radio" name="outcome" value="fixed" checked><span>Fixed</span></label>
+        <label class="opt"><input type="radio" name="outcome" value="unfixable"><span>Could not be fixed</span></label></div></div>
+      <div class="field"><div class="label">Condition now</div><div class="opts">${Object.entries(COND).filter(([k]) => k !== 'repair').map(([k, [l]]) =>
+        `<label class="opt"><input type="radio" name="condition" value="${k}" ${k === 'good' ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+      <div class="field"><label>What was done</label><textarea name="resolution" rows="2" placeholder="e.g. Replaced battery and keyboard"></textarea></div>
+      <div class="form-row"><div class="field"><label>${atRepair ? 'Date back' : 'Date closed'}</label><input type="date" name="returned_at" value="${esc(App.cfg.today)}"></div>
+        <div class="field"><label>Repair cost (${esc(App.cfg.currency)})</label><input type="number" name="cost" min="0" step="0.01"></div></div>
+      ${open.holder_name && !t.holder_id ? `<label class="check-row"><input type="checkbox" name="give_back" checked><span>Give it back to ${esc(open.holder_name)}</span></label>` : ''}</form>`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="tc-ok">Save</button>');
+    const form = $('#tc-form', el);
+    form.addEventListener('change', (e) => {
+      if (e.target.name !== 'outcome') return;
+      const c = e.target.value === 'fixed' ? 'good' : 'faulty';
+      $$('[name=condition]', form).forEach((r) => { r.checked = r.value === c; });
+    });
+    $('#tc-ok', el).addEventListener('click', async (e) => {
+      try { await App.busy(e.currentTarget, () => api('tool_repair_close', { data: { id: t.id, ...App.formData(form) } })); App.closeTop(); toast('Repair closed'); done(); } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+    });
+  }
+
   function editTool(t, cats, done) {
     const isNew = !t;
     t = t || { name: '', category: '', serial_no: '', tag_code: '', condition: 'good', value: '', purchase_date: '', notes: '' };
+    const v = (k) => esc(t[k] || '');
     const el = App.modal(isNew ? 'Add tool' : `Edit ${esc(t.name)}`, `<form id="te-form" novalidate>
-      <div class="form-row"><div class="field"><label>Name <span class="req">*</span></label><input name="name" value="${esc(t.name)}" placeholder="e.g. HP ProBook 450 laptop" autofocus></div>
-        <div class="field"><label>Category</label><input name="category" list="te-cats" value="${esc(t.category)}" placeholder="e.g. Laptop, Toolkit, Tester">
-          <datalist id="te-cats">${cats.concat(['Laptop', 'Toolkit', 'Drill', 'Tester / multimeter', 'Projector', 'Router / MiFi', 'Robotics kit']).filter((v, i, a) => a.indexOf(v) === i).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div></div>
-      <div class="form-row"><div class="field"><label>Tag / asset code</label><input name="tag_code" value="${esc(t.tag_code)}" placeholder="e.g. DT-LAP-007"></div>
-        <div class="field"><label>Serial number</label><input name="serial_no" value="${esc(t.serial_no)}"></div></div>
+      <div class="form-row"><div class="field"><label>Name <span class="req">*</span></label><input name="name" value="${v('name')}" placeholder="e.g. HP ProBook 450 laptop" autofocus></div>
+        <div class="field"><label>Category</label><input name="category" list="te-cats" value="${v('category')}" placeholder="e.g. Laptop, Toolkit, Tester">
+          <datalist id="te-cats">${cats.concat(['Laptop', 'Desktop', 'Tablet', 'Toolkit', 'Drill', 'Tester / multimeter', 'Projector', 'Router / MiFi', 'Robotics kit']).filter((x, i, a) => a.indexOf(x) === i).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div></div>
+      <div class="form-row"><div class="field"><label>Brand</label><input name="brand" value="${v('brand')}" placeholder="e.g. HP, Dell, Lenovo"></div>
+        <div class="field"><label>Model</label><input name="model" value="${v('model')}" placeholder="e.g. ProBook 450 G8"></div></div>
+      <div class="form-row"><div class="field"><label>Tag / asset code</label><input name="tag_code" value="${v('tag_code')}" placeholder="e.g. DT-LAP-007"></div>
+        <div class="field"><label>Serial number</label><input name="serial_no" value="${v('serial_no')}"></div></div>
+      <div id="te-specs">
+        <div class="form-row"><div class="field"><label>Processor</label><input name="processor" value="${v('processor')}" placeholder="e.g. Core i5 11th gen"></div>
+          <div class="field"><label>RAM</label><input name="ram" list="te-ram" value="${v('ram')}" placeholder="e.g. 8GB"><datalist id="te-ram">${['4GB', '8GB', '12GB', '16GB', '32GB'].map((x) => `<option value="${x}">`).join('')}</datalist></div></div>
+        <div class="form-row"><div class="field"><label>Storage</label><input name="storage" list="te-sto" value="${v('storage')}" placeholder="e.g. 256GB SSD"><datalist id="te-sto">${['128GB SSD', '256GB SSD', '512GB SSD', '1TB SSD', '500GB HDD', '1TB HDD'].map((x) => `<option value="${x}">`).join('')}</datalist></div>
+          <div class="field"><label>Operating system</label><input name="os" list="te-os" value="${v('os')}" placeholder="e.g. Windows 11 Pro"><datalist id="te-os">${['Windows 10', 'Windows 11', 'Windows 11 Pro', 'macOS', 'ChromeOS', 'Ubuntu'].map((x) => `<option value="${x}">`).join('')}</datalist></div></div>
+        <div class="form-row"><div class="field"><label>Screen size</label><input name="screen" value="${v('screen')}" placeholder="e.g. 15.6&quot;"></div>
+          <div class="field"><label>Comes with</label><input name="accessories" value="${v('accessories')}" placeholder="e.g. Charger, Bag, Mouse"></div></div>
+        <p class="faint small" style="margin:-4px 0 12px">Laptops need brand, model, serial number, RAM, storage and a photo before they can be issued.</p>
+      </div>
       <div class="field"><div class="label">Condition</div><div class="opts">${Object.entries(COND).map(([k, [l]]) => `<label class="opt"><input type="radio" name="condition" value="${k}" ${k === t.condition ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="form-row"><div class="field"><label>Value (${esc(App.cfg.currency)})</label><input type="number" name="value" min="0" step="0.01" value="${esc(+t.value || '')}"></div>
-        <div class="field"><label>Purchase date</label><input type="date" name="purchase_date" value="${esc(t.purchase_date || '')}"></div></div>
+        <div class="field"><label>Purchase date</label><input type="date" name="purchase_date" value="${v('purchase_date')}"></div></div>
+      <div class="form-row"><div class="field"><label>Supplier</label><input name="supplier" value="${v('supplier')}"></div>
+        <div class="field"><label>Warranty until</label><input type="date" name="warranty_until" value="${v('warranty_until')}"></div></div>
       <div class="field"><label>Notes</label><textarea name="notes" rows="2">${esc(t.notes || '')}</textarea></div>
       <div class="field"><div class="label">Photos</div><div id="te-up"></div></div></form>`,
     `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="te-ok">${isNew ? 'Add tool' : 'Save'}</button>`, { wide: true });
     const up = App.uploader($('#te-up', el), { existing: t.files?.length || 0, label: 'Add photo' });
+    const specs = $('#te-specs', el);
+    const cat = $('[name=category]', el);
+    const syncSpecs = () => { specs.hidden = !isComputer(cat.value) && !['processor', 'ram', 'storage', 'os', 'screen'].some((k) => t[k]); };
+    cat.addEventListener('input', syncSpecs);
+    syncSpecs();
     $('#te-ok', el).addEventListener('click', async (e) => {
       const form = $('#te-form', el);
       const d = App.formData(form);
@@ -793,9 +942,10 @@
     }
     if (tab === 'tools') {
       return `<div class="card"><div class="card-head"><h3>Tools held</h3>${isManagement() ? '<button class="btn sm primary" id="pt-issue"><i class="ti ti-arrow-up-right"></i>Issue a tool</button>' : ''}</div>
-        ${p.tools.length ? `<ul class="list">${p.tools.map((t) => `<li class="li" data-tool="${t.id}"><div class="li-icon tone-brand"><i class="ti ti-tools"></i></div>
-          <div class="main-col"><div class="t">${esc(t.name)}</div><div class="s">${[t.category, t.tag_code, t.serial_no].filter(Boolean).map(esc).join(' · ')} · since ${esc(fmtDate(t.issued_at, false))}</div></div>${condPill(t.condition)}</li>`).join('')}</ul>`
-          : App.empty('tools', 'No tools issued', isManagement() ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here.')}</div>`;
+        ${p.tools.length ? `<ul class="list">${p.tools.map((t) => `<li class="li click" data-tool="${t.id}">${toolThumb(t)}
+          <div class="main-col"><div class="t">${esc(t.name)}</div><div class="s">${[specLine(t), t.tag_code, t.serial_no].filter(Boolean).map(esc).join(' · ')} · since ${esc(fmtDate(t.issued_at, false))}</div></div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${condPill(t.condition)}${t.repair_status === 'open' && t.condition !== 'faulty' ? repairPill('open') : ''}</div></li>`).join('')}</ul>`
+          : App.empty('tools', 'No tools issued', isManagement() ? 'Issue tools from the store so you know who holds what.' : 'Tools your admin issues to you show up here. Tap one to report a problem with it.')}</div>`;
     }
     if (tab === 'attendance') {
       return `<div class="card card-pad" style="margin-bottom:14px"><h3 style="margin-bottom:10px">This month</h3><div id="pt-cal">${App.loading()}</div></div>
@@ -860,8 +1010,7 @@
     }
     if (tab === 'tools') {
       $$('[data-tool]', body).forEach((li) => li.addEventListener('click', async () => {
-        if (!isManagement()) return;
-        const staff = (await api('users_list')).items.filter((u) => u.active);
+        const staff = isManagement() ? (await api('users_list')).items.filter((u) => u.active) : [];
         openTool(+li.dataset.tool, staff, reload);
       }));
       $('#pt-issue', body)?.addEventListener('click', async () => {
