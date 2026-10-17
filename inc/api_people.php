@@ -1,7 +1,7 @@
 <?php
 /* Staff profiles, work tools register, attendance (clock in/out with GPS + selfie) */
 
-const TOOL_CONDITIONS = ['good', 'fair', 'faulty', 'lost', 'retired'];
+const TOOL_CONDITIONS = ['good', 'fair', 'faulty', 'repair', 'lost', 'retired'];
 const PROFILE_COLS = 'id, name, email, phone, role, location, schools, job_title, duties, address, next_of_kin, next_of_kin_phone,
     bank_name, bank_account, start_date, salary, photo_id, active, last_login, created_at';
 
@@ -29,7 +29,8 @@ function act_staff_profile(array $in, array $me): void
             unset($u['bank_name'], $u['bank_account']); // a sub admin sees work, not another person's money
         }
     }
-    $tools = q('SELECT id, name, category, serial_no, tag_code, `condition`, issued_at FROM tools WHERE holder_id = ? ORDER BY name', [$uid])->fetchAll();
+    $tools = q('SELECT t.id, t.name, t.category, t.serial_no, t.tag_code, t.`condition`, t.issued_at, t.brand, t.model, t.ram, t.storage,
+        ' . TOOL_PHOTO_SQL . ' AS photo_id, ' . TOOL_REPAIR_SQL . ' AS repair_status FROM tools t WHERE t.holder_id = ? ORDER BY t.name', [$uid])->fetchAll();
     $jobs = q(JOB_LIST_SQL . " WHERE EXISTS (SELECT 1 FROM job_assignees a WHERE a.job_id = j.id AND a.user_id = ? AND a.removed_at IS NULL)
         ORDER BY j.status IN ('done','cancelled'), j.id DESC LIMIT 30", [$uid])->fetchAll();
     $reports = q('SELECT id, report_date, location, work_type, finished FROM reports WHERE user_id = ? ORDER BY report_date DESC, id DESC LIMIT 8', [$uid])->fetchAll();
@@ -116,6 +117,11 @@ function act_staff_photo(array $in, array $me): void
 
 /* ------------------------------------------------------------------ tools */
 
+const TOOL_SPEC_FIELDS = ['brand' => 60, 'model' => 120, 'processor' => 80, 'ram' => 30, 'storage' => 40, 'os' => 60, 'screen' => 20,
+    'accessories' => 300, 'supplier' => 120];
+const TOOL_PHOTO_SQL = "(SELECT MIN(a.id) FROM attachments a WHERE a.owner_type = 'tool' AND a.owner_id = t.id AND a.mime LIKE 'image/%' AND a.thumb_name IS NOT NULL)";
+const TOOL_REPAIR_SQL = "(SELECT r.status FROM tool_repairs r WHERE r.tool_id = t.id AND r.status IN ('open','at_repair') ORDER BY r.id DESC LIMIT 1)";
+
 function load_tool(int $id): array
 {
     $t = q('SELECT t.*, u.name AS holder_name FROM tools t LEFT JOIN users u ON u.id = t.holder_id WHERE t.id = ?', [$id])->fetch();
@@ -126,32 +132,101 @@ function load_tool(int $id): array
     return $t;
 }
 
-function act_tools_list(array $in, array $me): void
+function is_laptop(array $t): bool
 {
-    require_management();
+    return stripos((string)$t['category'], 'laptop') !== false;
+}
+
+function tool_move(int $toolId, ?int $userId, string $action, string $cond, string $note, int $by, string $items = ''): void
+{
+    q('INSERT INTO tool_moves (tool_id, user_id, action, `condition`, note, items, by_user, created_at) VALUES (?,?,?,?,?,?,?,NOW())',
+        [$toolId, $userId ?: null, $action, $cond, $note, $items, $by]);
+}
+
+/** The accessories ticked on an issue or return form, kept as a comma list. */
+function tool_items_in($items): string
+{
+    $items = array_filter(array_map(fn($x) => str_in((string)$x, 40), (array)$items));
+    return str_in(implode(', ', array_unique($items)), 300);
+}
+
+function open_repair(int $toolId): ?array
+{
+    return q("SELECT * FROM tool_repairs WHERE tool_id = ? AND status IN ('open','at_repair') ORDER BY id DESC LIMIT 1", [$toolId])->fetch() ?: null;
+}
+
+function management_ids(array $except = []): array
+{
+    $in = implode(',', array_fill(0, count(MANAGEMENT_ROLES), '?'));
+    $ids = array_map('intval', q("SELECT id FROM users WHERE active = 1 AND role IN ($in)", MANAGEMENT_ROLES)->fetchAll(PDO::FETCH_COLUMN));
+    return array_values(array_diff($ids, $except));
+}
+
+function tool_where(array $in, array &$p): string
+{
     $w = ['1=1'];
-    $p = [];
     if (($in['holder'] ?? '') === 'store') {
         $w[] = 't.holder_id IS NULL';
     } elseif (!empty($in['holder'])) {
         $w[] = 't.holder_id = ?';
         $p[] = (int)$in['holder'];
     }
-    if (in_array($in['condition'] ?? '', TOOL_CONDITIONS, true)) {
+    if (($in['condition'] ?? '') === 'issues') {
+        $w[] = "(t.`condition` IN ('faulty','repair') OR " . TOOL_REPAIR_SQL . ' IS NOT NULL)';
+    } elseif (in_array($in['condition'] ?? '', TOOL_CONDITIONS, true)) {
         $w[] = 't.`condition` = ?';
         $p[] = $in['condition'];
     }
-    if (!empty($in['q'])) {
-        $w[] = '(t.name LIKE ? OR t.serial_no LIKE ? OR t.tag_code LIKE ? OR t.category LIKE ?)';
-        $like = '%' . str_in($in['q'], 100) . '%';
-        array_push($p, $like, $like, $like, $like);
+    if (!empty($in['category'])) {
+        $w[] = 't.category = ?';
+        $p[] = str_in($in['category'], 80);
     }
-    $rows = q('SELECT t.id, t.name, t.category, t.serial_no, t.tag_code, t.`condition`, t.value, t.holder_id, t.issued_at, u.name AS holder_name
-        FROM tools t LEFT JOIN users u ON u.id = t.holder_id WHERE ' . implode(' AND ', $w) . ' ORDER BY t.name, t.id', $p)->fetchAll();
+    if (!empty($in['q'])) {
+        $w[] = '(t.name LIKE ? OR t.serial_no LIKE ? OR t.tag_code LIKE ? OR t.category LIKE ? OR t.brand LIKE ? OR t.model LIKE ?)';
+        $like = '%' . str_in($in['q'], 100) . '%';
+        array_push($p, $like, $like, $like, $like, $like, $like);
+    }
+    return implode(' AND ', $w);
+}
+
+function act_tools_list(array $in, array $me): void
+{
+    require_management();
+    $p = [];
+    $rows = q('SELECT t.id, t.name, t.category, t.serial_no, t.tag_code, t.`condition`, t.value, t.holder_id, t.issued_at, t.brand, t.model,
+        t.processor, t.ram, t.storage, u.name AS holder_name, ' . TOOL_PHOTO_SQL . ' AS photo_id, ' . TOOL_REPAIR_SQL . ' AS repair_status
+        FROM tools t LEFT JOIN users u ON u.id = t.holder_id WHERE ' . tool_where($in, $p) . ' ORDER BY t.name, t.id', $p)->fetchAll();
     $totals = q("SELECT COUNT(*) AS n, COALESCE(SUM(value),0) AS value, SUM(holder_id IS NOT NULL) AS issued,
-        SUM(`condition` IN ('faulty','lost')) AS problems FROM tools WHERE `condition` <> 'retired'")->fetch();
+        SUM(`condition` = 'faulty') AS faulty, SUM(`condition` = 'repair') AS repair, SUM(`condition` = 'lost') AS lost,
+        SUM(category LIKE '%laptop%') AS laptops FROM tools WHERE `condition` <> 'retired'")->fetch();
     $cats = q("SELECT DISTINCT category FROM tools WHERE category <> '' ORDER BY category")->fetchAll(PDO::FETCH_COLUMN);
-    json_out(['ok' => true, 'items' => $rows, 'totals' => $totals, 'categories' => $cats]);
+    // Who holds what: one row per staff member, the biggest laptop holders first.
+    $byHolder = q("SELECT u.id, u.name, COUNT(*) AS n, SUM(t.category LIKE '%laptop%') AS laptops, SUM(t.`condition` = 'faulty') AS faulty
+        FROM tools t JOIN users u ON u.id = t.holder_id GROUP BY u.id, u.name ORDER BY laptops DESC, n DESC, u.name")->fetchAll();
+    json_out(['ok' => true, 'items' => $rows, 'totals' => $totals, 'categories' => $cats, 'by_holder' => $byHolder]);
+}
+
+function act_tools_export(array $in, array $me): void
+{
+    require_management();
+    $p = [];
+    $rows = q('SELECT t.*, u.name AS holder_name, ' . TOOL_REPAIR_SQL . ' AS repair_status,
+        (SELECT COUNT(*) FROM tool_repairs r WHERE r.tool_id = t.id) AS repairs, (SELECT COALESCE(SUM(r.cost),0) FROM tool_repairs r WHERE r.tool_id = t.id) AS repair_cost
+        FROM tools t LEFT JOIN users u ON u.id = t.holder_id WHERE ' . tool_where($in, $p) . ' ORDER BY t.category, t.name, t.id', $p)->fetchAll();
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="work-tools-' . today() . '.csv"');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, ['Tag', 'Name', 'Category', 'Brand', 'Model', 'Serial no.', 'Processor', 'RAM', 'Storage', 'OS', 'Screen', 'Accessories',
+        'Condition', 'Repair status', 'Held by', 'Issued', 'Value', 'Purchase date', 'Supplier', 'Warranty until', 'Times repaired', 'Repair cost', 'Notes']);
+    foreach ($rows as $r) {
+        fputcsv($out, array_map(fn($x) => csv_safe((string)$x), [
+            $r['tag_code'], $r['name'], $r['category'], $r['brand'], $r['model'], $r['serial_no'], $r['processor'], $r['ram'], $r['storage'], $r['os'],
+            $r['screen'], $r['accessories'], $r['condition'], str_replace('_', ' ', (string)$r['repair_status']), $r['holder_name'] ?? 'In store',
+            $r['issued_at'] ?? '', $r['value'], $r['purchase_date'] ?? '', $r['supplier'], $r['warranty_until'] ?? '', $r['repairs'], $r['repair_cost'], $r['notes'],
+        ]));
+    }
+    exit;
 }
 
 function act_tool_get(array $in, array $me): void
@@ -160,9 +235,12 @@ function act_tool_get(array $in, array $me): void
     if (!is_management($me) && (int)$t['holder_id'] !== $me['id']) {
         fail('This tool isn\'t issued to you.', 403);
     }
-    $t['moves'] = q('SELECT m.action, m.`condition`, m.note, m.created_at, u.name AS user_name, b.name AS by_name FROM tool_moves m
+    $t['moves'] = q('SELECT m.action, m.`condition`, m.note, m.items, m.created_at, u.name AS user_name, b.name AS by_name FROM tool_moves m
         LEFT JOIN users u ON u.id = m.user_id LEFT JOIN users b ON b.id = m.by_user WHERE m.tool_id = ? ORDER BY m.id DESC', [$t['id']])->fetchAll();
+    $t['repairs'] = q('SELECT r.*, h.name AS holder_name, b.name AS reported_by_name FROM tool_repairs r
+        LEFT JOIN users h ON h.id = r.holder_id LEFT JOIN users b ON b.id = r.reported_by WHERE r.tool_id = ? ORDER BY r.id DESC', [$t['id']])->fetchAll();
     $t['files'] = attachments_for('tool', [$t['id']])[$t['id']] ?? [];
+    $t['laptop'] = is_laptop($t);
     json_out(['ok' => true, 'tool' => $t]);
 }
 
@@ -179,13 +257,20 @@ function act_tool_save(array $in, array $me): void
         'condition' => in_array($in['condition'] ?? '', TOOL_CONDITIONS, true) ? $in['condition'] : 'good',
         'value' => max(0, money_in($in['value'] ?? 0)),
         'purchase_date' => valid_date($in['purchase_date'] ?? null) ? $in['purchase_date'] : null,
+        'warranty_until' => valid_date($in['warranty_until'] ?? null) ? $in['warranty_until'] : null,
         'notes' => str_in($in['notes'] ?? '', 2000),
     ];
+    foreach (TOOL_SPEC_FIELDS as $k => $len) {
+        $v[$k] = str_in($in[$k] ?? '', $len);
+    }
     if ($v['name'] === '') {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => ['name' => 'Enter the tool name.']], 422);
     }
     if ($v['tag_code'] !== '' && q('SELECT id FROM tools WHERE tag_code = ? AND id <> ?', [$v['tag_code'], $id])->fetchColumn()) {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => ['tag_code' => 'Another tool already has this tag.']], 422);
+    }
+    if ($v['serial_no'] !== '' && q('SELECT id FROM tools WHERE serial_no = ? AND id <> ?', [$v['serial_no'], $id])->fetchColumn()) {
+        json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => ['serial_no' => 'Another tool already has this serial number.']], 422);
     }
     $existing = $id ? (int)q("SELECT COUNT(*) FROM attachments WHERE owner_type = 'tool' AND owner_id = ?", [$id])->fetchColumn() : 0;
     if ($err = check_uploads('files', $existing)) {
@@ -196,8 +281,7 @@ function act_tool_save(array $in, array $me): void
     if ($old) {
         q('UPDATE tools SET ' . implode(', ', array_map(fn($k) => "`$k` = ?", $cols)) . ' WHERE id = ?', array_merge(array_values($v), [$id]));
         if ($old['condition'] !== $v['condition']) {
-            q('INSERT INTO tool_moves (tool_id, user_id, action, `condition`, note, by_user, created_at) VALUES (?,?,?,?,?,?,NOW())',
-                [$id, $old['holder_id'], 'condition', $v['condition'], 'Condition changed from ' . $old['condition'] . '.', $me['id']]);
+            tool_move($id, (int)$old['holder_id'], 'condition', $v['condition'], 'Condition changed from ' . $old['condition'] . '.', $me['id']);
         }
         audit('tool_update', 'tool', $id);
     } else {
@@ -211,6 +295,17 @@ function act_tool_save(array $in, array $me): void
     json_out(['ok' => true, 'id' => $id]);
 }
 
+/** What a laptop record still needs before it can be handed to staff. */
+function laptop_missing(array $t): array
+{
+    $need = ['brand' => 'brand', 'model' => 'model', 'serial_no' => 'serial number', 'ram' => 'RAM', 'storage' => 'storage'];
+    $missing = array_values(array_map(fn($k) => $need[$k], array_filter(array_keys($need), fn($k) => trim((string)$t[$k]) === '')));
+    if (!q("SELECT 1 FROM attachments WHERE owner_type = 'tool' AND owner_id = ? AND mime LIKE 'image/%' LIMIT 1", [$t['id']])->fetchColumn()) {
+        $missing[] = 'a photo';
+    }
+    return $missing;
+}
+
 function act_tool_issue(array $in, array $me): void
 {
     require_management();
@@ -220,22 +315,25 @@ function act_tool_issue(array $in, array $me): void
     if (!$u) {
         fail('Choose an active staff member.');
     }
-    if (in_array($t['condition'], ['lost', 'retired'], true)) {
-        fail('This tool is marked ' . $t['condition'] . '. Change its condition before issuing it.');
+    if (in_array($t['condition'], ['lost', 'retired', 'repair'], true)) {
+        fail('This tool is marked ' . ($t['condition'] === 'repair' ? 'at repair' : $t['condition']) . '. Change its condition before issuing it.');
+    }
+    if (is_laptop($t) && ($missing = laptop_missing($t))) {
+        fail('Record this laptop\'s ' . implode(', ', $missing) . ' before issuing it. Press Edit to add them.');
     }
     $note = str_in($in['note'] ?? '', 1000);
+    $items = tool_items_in($in['items'] ?? []);
     db()->beginTransaction();
     if ($t['holder_id'] && (int)$t['holder_id'] !== $uid) {
-        q('INSERT INTO tool_moves (tool_id, user_id, action, `condition`, note, by_user, created_at) VALUES (?,?,?,?,?,?,NOW())',
-            [$t['id'], $t['holder_id'], 'return', $t['condition'], 'Returned when reissued to ' . $u['name'] . '.', $me['id']]);
+        tool_move($t['id'], (int)$t['holder_id'], 'return', $t['condition'], 'Returned when reissued to ' . $u['name'] . '.', $me['id']);
     }
     q('UPDATE tools SET holder_id = ?, issued_at = NOW() WHERE id = ?', [$uid, $t['id']]);
-    q('INSERT INTO tool_moves (tool_id, user_id, action, `condition`, note, by_user, created_at) VALUES (?,?,?,?,?,?,NOW())',
-        [$t['id'], $uid, 'issue', $t['condition'], $note, $me['id']]);
+    tool_move($t['id'], $uid, 'issue', $t['condition'], $note, $me['id'], $items);
     audit('tool_issue', 'tool', $t['id'], ['to' => $uid]);
     db()->commit();
     touch_change();
-    notify([$uid], 'tool', 'Tool issued to you: ' . $t['name'], trim(($t['tag_code'] ? 'Tag ' . $t['tag_code'] . '. ' : '') . $note), 'profile', false);
+    $body = trim(($t['tag_code'] ? 'Tag ' . $t['tag_code'] . '. ' : '') . ($items ? 'With: ' . $items . '. ' : '') . $note);
+    notify([$uid], 'tool', 'Tool issued to you: ' . $t['name'], $body, 'profile', false);
     json_out(['ok' => true]);
 }
 
@@ -249,11 +347,124 @@ function act_tool_return(array $in, array $me): void
     $cond = in_array($in['condition'] ?? '', TOOL_CONDITIONS, true) ? $in['condition'] : $t['condition'];
     db()->beginTransaction();
     q('UPDATE tools SET holder_id = NULL, issued_at = NULL, `condition` = ? WHERE id = ?', [$cond, $t['id']]);
-    q('INSERT INTO tool_moves (tool_id, user_id, action, `condition`, note, by_user, created_at) VALUES (?,?,?,?,?,?,NOW())',
-        [$t['id'], $t['holder_id'], 'return', $cond, str_in($in['note'] ?? '', 1000), $me['id']]);
+    tool_move($t['id'], (int)$t['holder_id'], 'return', $cond, str_in($in['note'] ?? '', 1000), $me['id'], tool_items_in($in['items'] ?? []));
     audit('tool_return', 'tool', $t['id'], ['from' => (int)$t['holder_id'], 'condition' => $cond]);
     db()->commit();
     touch_change();
+    json_out(['ok' => true]);
+}
+
+/** Staff report a problem with a tool they hold; management can log one for any tool. */
+function act_tool_report_issue(array $in, array $me): void
+{
+    $t = load_tool((int)($in['id'] ?? 0));
+    if (!is_management($me) && (int)$t['holder_id'] !== $me['id']) {
+        fail('You can only report issues with tools issued to you.', 403);
+    }
+    $issue = str_in($in['issue'] ?? '', 2000);
+    if ($issue === '') {
+        json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => ['issue' => 'Describe the problem.']], 422);
+    }
+    if (open_repair($t['id'])) {
+        fail('This tool already has an open issue. Management will update it.');
+    }
+    $existing = (int)q("SELECT COUNT(*) FROM attachments WHERE owner_type = 'tool' AND owner_id = ?", [$t['id']])->fetchColumn();
+    if ($err = check_uploads('files', $existing)) {
+        fail($err);
+    }
+    $cond = $t['condition'] === 'repair' ? 'repair' : 'faulty';
+    db()->beginTransaction();
+    q("INSERT INTO tool_repairs (tool_id, holder_id, issue, reported_by, reported_at, status, updated_at) VALUES (?,?,?,?,NOW(),'open',NOW())",
+        [$t['id'], $t['holder_id'] ?: null, $issue, $me['id']]);
+    q('UPDATE tools SET `condition` = ? WHERE id = ?', [$cond, $t['id']]);
+    tool_move($t['id'], (int)$t['holder_id'], 'problem', $cond, $issue, $me['id']);
+    save_uploads('tool', $t['id'], $me['id']);
+    audit('tool_issue_report', 'tool', $t['id']);
+    db()->commit();
+    touch_change();
+    notify(management_ids([$me['id']]), 'tool', 'Issue reported: ' . $t['name'] . ($t['tag_code'] ? ' (' . $t['tag_code'] . ')' : ''),
+        $me['name'] . ': ' . $issue, 'tools', false);
+    json_out(['ok' => true]);
+}
+
+/** Send a tool out for repair. Logs the issue first if nobody reported one. */
+function act_tool_repair_send(array $in, array $me): void
+{
+    require_management();
+    $t = load_tool((int)($in['id'] ?? 0));
+    $rep = open_repair($t['id']);
+    if ($rep && $rep['status'] === 'at_repair') {
+        fail('This tool is already at repair.');
+    }
+    $repairer = str_in($in['repairer'] ?? '', 120);
+    $issue = str_in($in['issue'] ?? '', 2000);
+    $errs = [];
+    if ($repairer === '') {
+        $errs['repairer'] = 'Enter who is repairing it.';
+    }
+    if (!$rep && $issue === '') {
+        $errs['issue'] = 'Describe the problem.';
+    }
+    if ($errs) {
+        json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errs], 422);
+    }
+    $sent = valid_date($in['sent_at'] ?? null) ? $in['sent_at'] : today();
+    $expected = valid_date($in['expected_at'] ?? null) ? $in['expected_at'] : null;
+    $phone = str_in($in['repairer_phone'] ?? '', 40);
+    db()->beginTransaction();
+    if ($rep) {
+        q("UPDATE tool_repairs SET status = 'at_repair', repairer = ?, repairer_phone = ?, sent_at = ?, expected_at = ?,
+            issue = CONCAT(COALESCE(issue, ''), ?), updated_at = NOW() WHERE id = ?",
+            [$repairer, $phone, $sent, $expected, $issue !== '' ? "\n" . $issue : '', $rep['id']]);
+    } else {
+        q("INSERT INTO tool_repairs (tool_id, holder_id, issue, reported_by, reported_at, status, repairer, repairer_phone, sent_at, expected_at, updated_at)
+            VALUES (?,?,?,?,NOW(),'at_repair',?,?,?,?,NOW())", [$t['id'], $t['holder_id'] ?: null, $issue, $me['id'], $repairer, $phone, $sent, $expected]);
+    }
+    if ($t['holder_id']) {
+        tool_move($t['id'], (int)$t['holder_id'], 'return', 'faulty', 'Collected to send for repair.', $me['id']);
+    }
+    q("UPDATE tools SET `condition` = 'repair', holder_id = NULL, issued_at = NULL WHERE id = ?", [$t['id']]);
+    tool_move($t['id'], null, 'repair', 'repair', 'Sent to ' . $repairer . ($expected ? ', expected back ' . $expected : '') . '.', $me['id']);
+    audit('tool_repair_send', 'tool', $t['id'], ['repairer' => $repairer]);
+    db()->commit();
+    touch_change();
+    json_out(['ok' => true]);
+}
+
+/** Close an open issue: back from the repairer (fixed or not), or sorted without a repair. */
+function act_tool_repair_close(array $in, array $me): void
+{
+    require_management();
+    $t = load_tool((int)($in['id'] ?? 0));
+    $rep = open_repair($t['id']);
+    if (!$rep) {
+        fail('This tool has no open issue.');
+    }
+    $outcome = ($in['outcome'] ?? '') === 'unfixable' ? 'unfixable' : 'fixed';
+    $cond = in_array($in['condition'] ?? '', TOOL_CONDITIONS, true) && $in['condition'] !== 'repair'
+        ? $in['condition'] : ($outcome === 'fixed' ? 'good' : 'faulty');
+    $returned = valid_date($in['returned_at'] ?? null) ? $in['returned_at'] : today();
+    $cost = max(0, money_in($in['cost'] ?? 0));
+    $resolution = str_in($in['resolution'] ?? '', 2000);
+    $giveBack = !empty($in['give_back']) && $rep['holder_id'] && !$t['holder_id'] && !in_array($cond, ['lost', 'retired'], true)
+        ? q('SELECT id, name FROM users WHERE id = ? AND active = 1', [$rep['holder_id']])->fetch() : null;
+    db()->beginTransaction();
+    q('UPDATE tool_repairs SET status = ?, returned_at = ?, cost = ?, resolution = ?, closed_by = ?, updated_at = NOW() WHERE id = ?',
+        [$outcome, $returned, $cost, $resolution, $me['id'], $rep['id']]);
+    q('UPDATE tools SET `condition` = ? WHERE id = ?', [$cond, $t['id']]);
+    $note = ($outcome === 'fixed' ? 'Fixed' : 'Could not be fixed') . ($rep['repairer'] ? ' by ' . $rep['repairer'] : '')
+        . ($cost ? ' · cost ' . number_format($cost, 2) : '') . ($resolution !== '' ? ' · ' . $resolution : '');
+    tool_move($t['id'], null, 'repaired', $cond, $note, $me['id']);
+    if ($giveBack) {
+        q('UPDATE tools SET holder_id = ?, issued_at = NOW() WHERE id = ?', [$giveBack['id'], $t['id']]);
+        tool_move($t['id'], (int)$giveBack['id'], 'issue', $cond, 'Given back after repair.', $me['id']);
+    }
+    audit('tool_repair_close', 'tool', $t['id'], ['outcome' => $outcome, 'cost' => $cost]);
+    db()->commit();
+    touch_change();
+    if ($giveBack) {
+        notify([(int)$giveBack['id']], 'tool', 'Your ' . $t['name'] . ' is back from repair', $resolution, 'profile', false);
+    }
     json_out(['ok' => true]);
 }
 
@@ -264,6 +475,7 @@ function act_tool_delete(array $in, array $me): void
     db()->beginTransaction();
     delete_attachments_of('tool', $t['id']);
     q('DELETE FROM tool_moves WHERE tool_id = ?', [$t['id']]);
+    q('DELETE FROM tool_repairs WHERE tool_id = ?', [$t['id']]);
     q('DELETE FROM tools WHERE id = ?', [$t['id']]);
     audit('tool_delete', 'tool', $t['id'], ['name' => $t['name']]);
     db()->commit();

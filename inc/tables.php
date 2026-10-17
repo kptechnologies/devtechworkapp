@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -200,6 +200,26 @@ function table_sql(): array
             created_at DATETIME NOT NULL,
             KEY idx_tool (tool_id),
             KEY idx_user (user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS tool_repairs (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            tool_id INT UNSIGNED NOT NULL,
+            holder_id INT UNSIGNED NULL,
+            issue TEXT NULL,
+            reported_by INT UNSIGNED NULL,
+            reported_at DATETIME NOT NULL,
+            status VARCHAR(12) NOT NULL DEFAULT 'open',
+            repairer VARCHAR(120) NOT NULL DEFAULT '',
+            repairer_phone VARCHAR(40) NOT NULL DEFAULT '',
+            sent_at DATE NULL,
+            expected_at DATE NULL,
+            returned_at DATE NULL,
+            cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+            resolution TEXT NULL,
+            closed_by INT UNSIGNED NULL,
+            updated_at DATETIME NULL,
+            KEY idx_tool (tool_id),
+            KEY idx_status (status)
         ) $t",
         "CREATE TABLE IF NOT EXISTS attendance (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -675,6 +695,18 @@ function column_sql(): array
         ['staff_queries', 'suspend_from', 'DATE NULL'],
         ['staff_queries', 'suspend_to', 'DATE NULL'],
         ['staff_queries', 'suspend_unpaid', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        // v16: laptop specs, accessories handed over, and a repair log for work tools
+        ['tools', 'brand', "VARCHAR(60) NOT NULL DEFAULT ''"],
+        ['tools', 'model', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['tools', 'processor', "VARCHAR(80) NOT NULL DEFAULT ''"],
+        ['tools', 'ram', "VARCHAR(30) NOT NULL DEFAULT ''"],
+        ['tools', 'storage', "VARCHAR(40) NOT NULL DEFAULT ''"],
+        ['tools', 'os', "VARCHAR(60) NOT NULL DEFAULT ''"],
+        ['tools', 'screen', "VARCHAR(20) NOT NULL DEFAULT ''"],
+        ['tools', 'accessories', "VARCHAR(300) NOT NULL DEFAULT ''"],
+        ['tools', 'supplier', "VARCHAR(120) NOT NULL DEFAULT ''"],
+        ['tools', 'warranty_until', 'DATE NULL'],
+        ['tool_moves', 'items', "VARCHAR(300) NOT NULL DEFAULT ''"],
     ];
 }
 
