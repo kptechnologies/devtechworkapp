@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -570,6 +570,50 @@ function table_sql(): array
             body TEXT NOT NULL,
             created_at DATETIME NOT NULL,
             KEY idx_memo (memo_id)
+        ) $t",
+        // v14: general notices pinned on every home page, phone alerts (web push) and Google Tasks links
+        "CREATE TABLE IF NOT EXISTS notices (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            sender_id INT UNSIGNED NOT NULL,
+            title VARCHAR(190) NOT NULL,
+            body TEXT NOT NULL,
+            urgent TINYINT(1) NOT NULL DEFAULT 0,
+            audience VARCHAR(12) NOT NULL DEFAULT 'all_staff',
+            expires_at DATETIME NULL,
+            archived_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_live (archived_at, expires_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS notice_reads (
+            notice_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            read_at DATETIME NULL,
+            ack_at DATETIME NULL,
+            PRIMARY KEY (notice_id, user_id),
+            KEY idx_user (user_id, ack_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            endpoint VARCHAR(500) NOT NULL,
+            endpoint_hash CHAR(64) NOT NULL,
+            p256dh VARCHAR(120) NOT NULL,
+            auth VARCHAR(60) NOT NULL,
+            user_agent VARCHAR(255) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            last_ok_at DATETIME NULL,
+            UNIQUE KEY uq_endpoint (endpoint_hash),
+            KEY idx_user (user_id)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS google_links (
+            user_id INT UNSIGNED PRIMARY KEY,
+            email VARCHAR(190) NOT NULL DEFAULT '',
+            refresh_token TEXT NOT NULL,
+            access_token TEXT NULL,
+            access_expires INT UNSIGNED NOT NULL DEFAULT 0,
+            tasklist_id VARCHAR(190) NOT NULL DEFAULT '',
+            last_error VARCHAR(300) NOT NULL DEFAULT '',
+            linked_at DATETIME NOT NULL
         ) $t",
     ];
 }

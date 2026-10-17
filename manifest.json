@@ -1,0 +1,12 @@
+{
+  "name": "DevTech Staff Portal",
+  "short_name": "DevTech",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#306090",
+  "icons": [
+    { "src": "assets/logo-mark.png", "sizes": "60x60", "type": "image/png" }
+  ]
+}

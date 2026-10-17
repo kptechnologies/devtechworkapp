@@ -177,6 +177,24 @@ Set a role under **Staff setup**. Every role below admin is still an employee: t
 - **Requests:** a manager, sub admin or supervisor sends a request to the admin, who approves or declines it with a note. Open requests stay on the admin's Memos badge until answered.
 - Everyone can reply on a memo's thread. On a memo to staff, each staff member sees only the sender's replies and their own.
 
+## General notices
+
+Any management role posts a notice from **Notices** to all staff, or to everyone including management. It shows as a banner at the top of each person's home page until they press **Got it**, it reaches its *Show until* date, or it is taken down. Urgent notices show in red. The sender sees who has pressed Got it, who has only opened it, and who hasn't seen it yet.
+
+## Phone alerts and Google Tasks
+
+**Phone alerts (web push)** need no setup beyond HTTPS. Each staff member opens **Profile → Alerts on your phone → Turn on** (the home page also offers it once). From then on every portal notification (notices, jobs, memos, queries and the rest) pops up on that phone straight away, even with the portal closed.
+- Android: works in Chrome.
+- iPhone: needs iOS 16.4 or newer. Open the portal in Safari, tap **Share → Add to Home Screen**, open it from the new icon, then turn alerts on.
+
+**Google Tasks** (optional) adds each notice and each new job order to a task list named after the company in the staff member's own Google Tasks, which reminds them on the due date. Google Tasks only keeps the date, not the time. To set it up once:
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project, open *APIs & Services → Library* and enable **Google Tasks API**.
+2. *OAuth consent screen*: choose **External** (or **Internal** if staff use Google Workspace on your domain), fill in the app name, and add the scope `.../auth/tasks`. With **Internal** there is nothing more to do. With **External**, publish the app (*Publishing status → In production*): while it is in *Testing* only listed test users can link, and Google expires their link every 7 days. Google may ask you to verify the app because the Tasks scope is sensitive; until then staff see an "unverified app" warning they can click through.
+3. *Credentials → Create credentials → OAuth client ID → Web application*. Paste the **Authorised redirect URI** shown in **Settings → Phone alerts & Google Tasks** (it is `https://your-domain/google.php`).
+4. Copy the Client ID and Client secret into that Settings card and save.
+
+Staff then press **Link** under Google Tasks on their profile and sign in with their Google account. They can unlink any time.
+
 ## Staff profiles and work tools
 
 Each staff profile shows contact, next-of-kin and bank details, responsibilities, tools held, attendance this month, jobs, reports and wallet. Staff keep their own details up to date under **Profile**.
@@ -189,6 +207,9 @@ Each staff profile shows contact, next-of-kin and bank details, responsibilities
 index.php        App page (sign-in + app)
 cron.php         Hourly reminders (run from cPanel Cron Jobs)
 api.php          JSON API
+google.php       Google Tasks sign-in (OAuth redirect)
+sw.js            Service worker that shows phone alerts
+manifest.json    Lets phones add the portal to the home screen
 file.php         Serves receipts/photos only to their owner or an admin
 install.php      One-time installer (delete after use)
 config.php       Created by the installer: database + app settings
