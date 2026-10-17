@@ -105,6 +105,8 @@ function public_config(array $me): array
         'lesson_subjects' => lesson_subjects(),
         'class_levels'  => class_levels(),
         'lesson_outcomes' => LESSON_OUTCOMES,
+        'work_days'     => work_days(),
+        'suspension'    => active_suspension($me['id']),
     ] + (is_admin($me) ? [
         'company_categories' => company_categories(),
         'project_categories' => project_categories(),

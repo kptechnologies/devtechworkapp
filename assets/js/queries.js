@@ -4,16 +4,24 @@
   const { $, $$, esc, api, toast, money, fmtDate, fmtDateTime, ago, isAdmin, isManagement, canIssueQueries } = App;
 
   const QSTATUS = {
-    proposed: ['Proposed, not issued', 'info'], open: ['Awaiting reply', 'out'], replied: ['Replied', 'info'], resolved: ['Resolved', 'in'], warning: ['Warning issued', 'bad'], withdrawn: ['Withdrawn', ''],
+    proposed: ['Proposed, not issued', 'info'], open: ['Awaiting reply', 'out'], replied: ['Replied', 'info'], resolved: ['Resolved', 'in'], warning: ['Warning issued', 'bad'], suspended: ['Suspended', 'bad'], withdrawn: ['Withdrawn', ''],
+  };
+  const range = (x) => `${fmtDate(x.suspend_from, false)} – ${fmtDate(x.suspend_to)}`;
+  /** Working days between two dates, counted the way payroll counts them. */
+  const workDaysIn = (from, to) => {
+    const days = App.cfg.work_days || [1, 2, 3, 4, 5];
+    let n = 0;
+    for (let d = from; d && to && d <= to; d = App.addDays(d, 1)) n += days.includes(((App.parseDate(d).getDay() + 6) % 7) + 1) ? 1 : 0;
+    return n;
   };
   const qPill = (x) => `<span class="pill ${QSTATUS[x.status]?.[1] || ''}">${esc(QSTATUS[x.status]?.[0] || x.status)}</span>${x.overdue ? ' <span class="pill bad">Overdue</span>' : ''}`;
-  const qTone = (s) => ({ open: 'tone-out', replied: 'tone-info', resolved: 'tone-in', warning: 'tone-bad' }[s] || '');
+  const qTone = (s) => ({ open: 'tone-out', replied: 'tone-info', resolved: 'tone-in', warning: 'tone-bad', suspended: 'tone-bad' }[s] || '');
   const cats = () => App.cfg.query_categories || {};
 
   App.queryList = (items, { showPerson = false } = {}) => items.length
     ? `<ul class="list">${items.map((x) => `<li class="li" data-query="${x.id}"><div class="li-icon ${qTone(x.status)}"><i class="ti ti-alert-triangle"></i></div>
         <div class="main-col"><div class="t">${showPerson ? `${esc(x.person)}${x.person_type === 'contractor' ? ' <span class="faint small">(contract)</span>' : ''} · ` : ''}${esc(x.subject)}</div>
-        <div class="s">${esc(x.ref)} · ${esc(x.category_label)} · ${esc(fmtDate(x.query_date, false))}${x.fine ? ` · fine ${money(x.fine, { short: true })}` : ''}</div></div>${qPill(x)}</li>`).join('')}</ul>`
+        <div class="s">${esc(x.ref)} · ${esc(x.category_label)} · ${esc(fmtDate(x.query_date, false))}${x.fine ? ` · fine ${money(x.fine, { short: true })}` : ''}${x.status === 'suspended' && x.suspend_to >= x.suspend_from ? ` · ${esc(range(x))}` : ''}</div></div>${qPill(x)}</li>`).join('')}</ul>`
     : App.empty('mood-happy', 'No queries', 'Queries on non-performance show up here.');
   App.bindQueryList = (root) => $$('[data-query]', root).forEach((li) => li.addEventListener('click', () => openQuery(+li.dataset.query)));
 
@@ -79,8 +87,9 @@
       let d = {};
       try { d = JSON.parse(h.details || '{}'); } catch { /* ignore */ }
       const what = { query_create: 'Issued', query_update: 'Edited', query_reply: 'Replied', query_resolved: 'Closed as resolved', query_warning: 'Warning issued',
-        query_withdrawn: 'Withdrawn', attachment_delete: 'Removed a file' }[h.action] || h.action;
-      return `<div class="qa"><div class="q">${esc(fmtDateTime(h.created_at))} · ${esc(h.name || 'System')}</div><div class="a">${esc(what)}${d.fine ? ` · fine ${money(d.fine)}` : ''}</div></div>`;
+        query_withdrawn: 'Withdrawn', query_suspended: 'Suspended', query_lift: 'Suspension lifted', attachment_delete: 'Removed a file' }[h.action] || h.action;
+      const sus = h.action === 'query_suspended' && d.from ? ` · ${fmtDate(d.from, false)} – ${fmtDate(d.to)}${+d.unpaid ? ', without pay' : ''}` : '';
+      return `<div class="qa"><div class="q">${esc(fmtDateTime(h.created_at))} · ${esc(h.name || 'System')}</div><div class="a">${esc(what)}${esc(sus)}${d.fine ? ` · fine ${money(d.fine)}` : ''}</div></div>`;
     }).join('');
     $('.drawer-body', el).innerHTML = `
       <div style="margin-bottom:12px"><h3 style="margin-bottom:6px">${esc(x.subject)}</h3>${qPill(x)}</div>
@@ -91,12 +100,12 @@
         ${x.job_id ? `<dt>Job order</dt><dd><a href="#/jobs/${x.job_id}">${esc(x.job_title || 'Job')}</a></dd>` : ''}
         ${x.fine ? `<dt>Fine</dt><dd class="bad">${money(x.fine)}${x.pay_adjustment_id ? ' · deducted in payroll' : x.person_type === 'staff' && live ? ' · deducted when closed' : ''}</dd>` : ''}
         <dt>Issued by</dt><dd>${esc(x.created_by_name || '—')} · ${esc(ago(x.created_at))}</dd>
-        ${admin ? `<dt>Record</dt><dd>${+x.counts.total} quer${+x.counts.total === 1 ? 'y' : 'ies'} · ${+x.counts.warnings || 0} warning${+x.counts.warnings === 1 ? '' : 's'}</dd>` : ''}
+        ${admin ? `<dt>Record</dt><dd>${+x.counts.total} quer${+x.counts.total === 1 ? 'y' : 'ies'} · ${+x.counts.warnings || 0} warning${+x.counts.warnings === 1 ? '' : 's'}${+x.counts.suspensions ? ` · ${+x.counts.suspensions} suspension${+x.counts.suspensions === 1 ? '' : 's'}` : ''}</dd>` : ''}
       </dl>
       <div class="sec-title">Query</div><div class="note-box">${esc(x.details)}</div>
       ${x.reply ? `<div class="sec-title">Reply</div><div class="note-box">${esc(x.reply)}</div>
         <div class="faint small" style="margin-top:4px">${x.replied_by_name && x.person_type === 'contractor' ? `Recorded by ${esc(x.replied_by_name)} · ` : ''}${esc(ago(x.replied_at))}</div>` : ''}
-      ${x.closed_at ? `<div class="sec-title">Outcome</div><div class="note-box ${x.status === 'warning' ? 'bad' : ''}"><b>${esc(QSTATUS[x.status][0])}</b> by ${esc(x.closed_by_name || 'admin')}, ${esc(fmtDate(x.closed_at))}${x.outcome_note ? '\n' + esc(x.outcome_note) : ''}</div>` : ''}
+      ${x.closed_at ? `<div class="sec-title">Outcome</div><div class="note-box ${['warning', 'suspended'].includes(x.status) ? 'bad' : ''}"><b>${esc(QSTATUS[x.status][0])}</b> by ${esc(x.closed_by_name || 'admin')}, ${esc(fmtDate(x.closed_at))}${x.status === 'suspended' ? (x.suspend_to < x.suspend_from ? '\nSuspension cancelled before it started.' : `\n${esc(range(x))}${x.suspend_unpaid ? ', without pay' : ''}${x.suspension_active ? '' : ' (ended)'}`) : ''}${x.outcome_note ? '\n' + esc(x.outcome_note) : ''}</div>` : ''}
       <div class="sec-title">Files</div><div id="qd-gal">${x.attachments.length ? App.gallery(x.attachments, { removable: live }) : '<p class="faint small">No files.</p>'}</div>
       ${canReply ? `<div class="sec-title">${own ? (x.reply ? 'Update your reply' : 'Your reply') : 'Record their reply'}</div><form id="qd-reply">
         <div class="field"><textarea name="reply" rows="4" placeholder="${own ? 'Explain what happened.' : 'What they said, in their words.'}">${esc(x.reply || '')}</textarea></div>
@@ -124,6 +133,8 @@
     if (canEdit) btns.push('<button class="btn" id="qd-edit"><i class="ti ti-edit"></i>Edit</button>');
     if (proposed && issuer) btns.push('<button class="btn danger" data-issue="discard"><i class="ti ti-trash"></i>Discard</button><button class="btn primary" data-issue="issue"><i class="ti ti-send"></i>Issue query</button>');
     else if (issuer && live) btns.push('<button class="btn primary" id="qd-close"><i class="ti ti-gavel"></i>Close query</button>');
+    else if (isAdmin() && x.status === 'warning' && x.person_type === 'staff') btns.push('<button class="btn danger" id="qd-suspend"><i class="ti ti-user-off"></i>Escalate to suspension</button>');
+    else if (isAdmin() && x.suspension_active) btns.push('<button class="btn" id="qd-lift"><i class="ti ti-user-check"></i>Lift suspension</button>');
     if (!btns.length) return;
     const foot = document.createElement('div');
     foot.className = 'drawer-foot';
@@ -131,6 +142,18 @@
     el.appendChild(foot);
     $('#qd-edit', el)?.addEventListener('click', () => { App.closeTop(); queryForm({}, x); });
     $('#qd-close', el)?.addEventListener('click', () => closeQuery(x));
+    $('#qd-suspend', el)?.addEventListener('click', () => closeQuery(x, { escalate: true }));
+    $('#qd-lift', el)?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const started = x.suspend_from <= App.cfg.today;
+      const note = await App.confirm('Lift this suspension?', `${esc(x.person)} can clock in and work on job orders again${started ? ' from today' : ''}. Any pay deduction already added stays in Payroll; remove it there if needed.`,
+        { ok: 'Lift suspension', input: { label: 'Note to them (optional)' } });
+      if (note === null || note === false) return;
+      try {
+        await App.busy(btn, () => api('query_lift', { data: { id: x.id, note } }));
+        App.closeAll(); toast('Suspension lifted'); App.current?.refresh?.(); App.poll();
+      } catch (err) { App.fail(err); }
+    });
     $$('[data-issue]', el).forEach((b) => b.addEventListener('click', async () => {
       const issue = b.dataset.issue === 'issue';
       const note = await App.confirm(issue ? 'Issue this query?' : 'Discard this proposal?',
@@ -145,28 +168,48 @@
   }
   App.openQuery = openQuery;
 
-  function closeQuery(x) {
+  function closeQuery(x, { escalate = false } = {}) {
     const staff = x.person_type === 'staff';
-    const el = App.modal(`Close ${esc(x.ref)}`, `<form id="qc-form">
-      ${x.status === 'open' ? '<div class="note-box warn" style="margin-bottom:12px">No reply yet. You can still close it if they didn\'t respond in time.</div>' : ''}
-      <div class="field"><div class="label">Outcome</div><div class="opts">
+    const canSuspend = isAdmin() && staff;
+    const el = App.modal(escalate ? `Suspend over ${esc(x.ref)}` : `Close ${esc(x.ref)}`, `<form id="qc-form">
+      ${x.status === 'open' && !escalate ? '<div class="note-box warn" style="margin-bottom:12px">No reply yet. You can still close it if they didn\'t respond in time.</div>' : ''}
+      ${escalate ? `<div class="note-box warn" style="margin-bottom:12px">A warning was already issued on this query. Suspending ${esc(x.person)} escalates it.</div><input type="hidden" name="outcome" value="suspended">`
+        : `<div class="field"><div class="label">Outcome</div><div class="opts">
         <label class="opt"><input type="radio" name="outcome" value="resolved" checked><span><i class="ti ti-circle-check"></i>Resolved: reply accepted</span></label>
         <label class="opt"><input type="radio" name="outcome" value="warning"><span><i class="ti ti-alert-octagon"></i>Issue a warning</span></label>
-        <label class="opt"><input type="radio" name="outcome" value="withdrawn"><span><i class="ti ti-arrow-back-up"></i>Withdraw the query</span></label></div></div>
-      <div class="field"><label for="qc-note">Note</label><textarea id="qc-note" name="note" rows="3" placeholder="Required for a warning"></textarea></div>
-      <div class="form-row ${isAdmin() ? '' : 'hide'}" id="qc-fine-row"><div class="field"><label for="qc-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qc-fine" name="fine" min="0" step="0.01" value="${esc(x.fine || '')}" placeholder="0"></div>
+        ${canSuspend ? '<label class="opt"><input type="radio" name="outcome" value="suspended"><span><i class="ti ti-user-off"></i>Suspend</span></label>' : ''}
+        <label class="opt"><input type="radio" name="outcome" value="withdrawn"><span><i class="ti ti-arrow-back-up"></i>Withdraw the query</span></label></div></div>`}
+      <div id="qc-susp" class="${escalate ? '' : 'hide'}">
+        <div class="form-row"><div class="field"><label for="qc-sf">First day</label><input type="date" id="qc-sf" name="suspend_from" value="${esc(App.cfg.today)}"></div>
+          <div class="field"><label for="qc-st">Last day</label><input type="date" id="qc-st" name="suspend_to" value="${esc(App.addDays(App.cfg.today, 6))}"></div></div>
+        <div class="field"><label class="check-row"><input type="checkbox" name="suspend_unpaid"><span>Without pay</span></label>
+          <div class="help" id="qc-sh"></div></div></div>
+      <div class="field"><label for="qc-note">${escalate ? 'Reason' : 'Note'}</label><textarea id="qc-note" name="note" rows="3" placeholder="Required for a warning or suspension"></textarea></div>
+      <div class="form-row ${isAdmin() && !escalate ? '' : 'hide'}" id="qc-fine-row"><div class="field"><label for="qc-fine">Fine (${esc(App.cfg.currency)})</label><input type="number" id="qc-fine" name="fine" min="0" step="0.01" value="${esc(x.fine || '')}" placeholder="0"></div>
         ${staff ? `<div class="field"><label for="qc-month">Deduct from pay for</label><input type="month" id="qc-month" name="month" value="${esc(App.cfg.today.slice(0, 7))}"></div>` : '<div></div>'}</div>
-      <div class="help ${isAdmin() ? '' : 'hide'}" id="qc-help">${staff ? 'A fine is added to Payroll as a deduction for that month.' : 'Contract staff aren\'t on payroll, so the fine is only recorded here. Deduct it when you next pay them.'}</div></form>`,
-    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="qc-ok">Close query</button>');
-    const sync = () => { $('#qc-fine-row', el).classList.toggle('hide', !isAdmin() || App.formData($('#qc-form', el)).outcome === 'withdrawn'); };
+      <div class="help ${isAdmin() && !escalate ? '' : 'hide'}" id="qc-help">${staff ? 'A fine is added to Payroll as a deduction for that month.' : 'Contract staff aren\'t on payroll, so the fine is only recorded here. Deduct it when you next pay them.'}</div></form>`,
+    `<button class="btn ghost" data-close>Cancel</button><button class="btn ${escalate ? 'danger' : 'primary'}" id="qc-ok">${escalate ? 'Suspend' : 'Close query'}</button>`);
+    const sync = () => {
+      const d = App.formData($('#qc-form', el));
+      const sus = d.outcome === 'suspended';
+      $('#qc-fine-row', el).classList.toggle('hide', !isAdmin() || escalate || d.outcome === 'withdrawn');
+      $('#qc-susp', el).classList.toggle('hide', !sus);
+      const n = workDaysIn(d.suspend_from, d.suspend_to);
+      $('#qc-sh', el).textContent = `${n} working day${n === 1 ? '' : 's'}. They can't clock in or work on job orders.${d.suspend_unpaid ? ' That many days\' salary is deducted in Payroll.' : ''}`;
+    };
+    sync();
     $('#qc-form', el).addEventListener('change', sync);
     $('#qc-ok', el).addEventListener('click', async (e) => {
       const d = App.formData($('#qc-form', el));
       if (d.outcome === 'warning' && !d.note.trim()) { toast('Write the warning so it is on record.', true); return; }
+      if (d.outcome === 'suspended') {
+        if (!d.note.trim()) { toast('Write the reason for the suspension so it is on record.', true); return; }
+        if (!d.suspend_from || !d.suspend_to || d.suspend_to < d.suspend_from) { toast('Pick the first and last day of the suspension.', true); return; }
+      }
       try {
         const r = await App.busy(e.currentTarget, () => api('query_close', { data: { ...d, id: x.id } }));
         App.closeAll();
-        toast(r.adjustment_id ? 'Query closed and fine added to payroll' : 'Query closed');
+        toast(d.outcome === 'suspended' ? `${x.person} suspended${r.unpaid_adjustments ? ', pay deduction added to payroll' : ''}` : r.adjustment_id ? 'Query closed and fine added to payroll' : 'Query closed');
         App.current?.refresh?.();
         App.poll();
       } catch (err) { App.fail(err); }
@@ -184,7 +227,7 @@
         <div class="page-head"><div><h1>Queries</h1><p class="muted">Written queries on non-performance by staff and contract staff. Staff reply in the portal. You record replies for contract staff.</p></div>
           <div class="actions"><button class="btn primary" id="qs-new"><i class="ti ti-plus"></i>${canIssueQueries() ? 'Raise a query' : 'Propose a query'}</button></div></div>
         <div class="filters" id="qs-f">
-          <div class="seg">${[['pending', 'Open'], ['replied', 'Replied'], ['warning', 'Warnings'], ['', 'All']].map(([k, l]) => `<button type="button" data-s="${k}" class="${k === qf.status ? 'on' : ''}">${l}</button>`).join('')}</div>
+          <div class="seg">${[['pending', 'Open'], ['replied', 'Replied'], ['warning', 'Warnings'], ['suspended', 'Suspensions'], ['', 'All']].map(([k, l]) => `<button type="button" data-s="${k}" class="${k === qf.status ? 'on' : ''}">${l}</button>`).join('')}</div>
           <select name="person_type">${App.opts([['staff', 'Staff'], ['contractor', 'Contract staff']], qf.person_type, { placeholder: 'Everyone' })}</select>
           <select name="category">${App.opts(Object.entries(r.categories), qf.category, { placeholder: 'All types' })}</select></div>
         <div class="card">${App.queryList(items, { showPerson: true })}</div>`

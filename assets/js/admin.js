@@ -238,7 +238,7 @@
             <td class="hide-sm">${esc(u.email)}</td><td class="hide-sm">${esc(u.phone)}</td><td>${esc(u.location)}</td>
             ${'balance' in u ? `<td class="r num ${u.balance < 0 ? 'bad' : ''}">${money(u.balance)}</td>` : ''}
             <td class="hide-sm">${u.last_report ? esc(fmtDate(u.last_report)) : '<span class="faint">—</span>'}</td>
-            <td>${u.role !== 'staff' ? `<span class="pill ${u.role === 'admin' ? 'brand' : 'info'}">${esc(App.roleLabel(u.role))}</span>` : ''} ${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
+            <td>${u.role !== 'staff' ? `<span class="pill ${u.role === 'admin' ? 'brand' : 'info'}">${esc(App.roleLabel(u.role))}</span>` : ''} ${u.suspended_until ? `<span class="pill bad">Suspended until ${esc(fmtDate(u.suspended_until, false))}</span> ` : ''}${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
             <td style="white-space:nowrap">${App.isAdmin() || !['admin', 'manager'].includes(u.role) ? '<button class="btn sm ghost" data-edit-u aria-label="Account and password" title="Account &amp; password"><i class="ti ti-key"></i></button>' : ''}<i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
       $('#st-add', ctx.el).addEventListener('click', () => editUser(null, load));
       $$('[data-u]', ctx.el).forEach((r) => r.addEventListener('click', (e) => {

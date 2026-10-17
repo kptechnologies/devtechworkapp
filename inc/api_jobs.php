@@ -111,6 +111,12 @@ function job_set_assignees(int $jobId, array $userIds, array $me): array
     $added = array_values(array_diff($want, $current));
     $removed = array_values(array_diff($current, $want));
     foreach ($added as $uid) {
+        if ($s = active_suspension($uid)) {
+            $name = q('SELECT name FROM users WHERE id = ?', [$uid])->fetchColumn();
+            fail("$name is suspended until " . date('j M Y', strtotime($s['to'])) . " ({$s['ref']}), so they can't be put on a job.");
+        }
+    }
+    foreach ($added as $uid) {
         q('INSERT INTO job_assignees (job_id, user_id, assigned_by, assigned_at) VALUES (?,?,?,NOW())', [$jobId, $uid, $me['id']]);
     }
     if ($removed) {
@@ -403,6 +409,9 @@ function act_job_status(array $in, array $me): void
     $notifyTo = [];
     $needPhotos = false;
 
+    if (in_array($action, ['start', 'complete', 'self_close'], true)) {
+        refuse_if_suspended($me['id'], 'work on job orders');
+    }
     switch ($action) {
         case 'start':
             if (!$assignee || !in_array($s, ['open', 'returned'], true)) {

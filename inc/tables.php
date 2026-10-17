@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -671,6 +671,10 @@ function column_sql(): array
         ['job_extensions', 'recommendation', "VARCHAR(10) NOT NULL DEFAULT ''"],
         ['job_extensions', 'recommend_note', "VARCHAR(500) NOT NULL DEFAULT ''"],
         ['job_extensions', 'recommended_at', 'DATETIME NULL'],
+        // v15: a query can be escalated to a suspension over a date range, with or without pay
+        ['staff_queries', 'suspend_from', 'DATE NULL'],
+        ['staff_queries', 'suspend_to', 'DATE NULL'],
+        ['staff_queries', 'suspend_unpaid', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ];
 }
 
