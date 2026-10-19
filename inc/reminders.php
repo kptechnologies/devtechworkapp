@@ -1,6 +1,6 @@
 <?php
 /*
- * Follow-up reminders, run hourly by cron.php (or by the live pulse when no cron is set up):
+ * Follow-up reminders, run by cron.php (every 5 minutes) (or by the live pulse when no cron is set up):
  *  - daily digest after the reminder time: unfinished jobs and attendance problems for admins, own jobs for each staff member
  *  - clock-out reminder an hour after work ends, for anyone still clocked in
  *  - missed clock-out sweep: yesterday's open clock-ins are marked "No clock-out"

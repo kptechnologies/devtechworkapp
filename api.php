@@ -18,6 +18,7 @@ require __DIR__ . '/inc/api_memos.php';
 require __DIR__ . '/inc/api_notices.php';
 require __DIR__ . '/inc/api_ideas.php';
 require __DIR__ . '/inc/reminders.php';
+require __DIR__ . '/inc/due_reminders.php';
 require __DIR__ . '/inc/import.php';
 
 start_session();
@@ -30,7 +31,9 @@ $IN = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['_csrf'] ?? '');
-    if (!is_string($token) || !hash_equals($_SESSION['csrf'], $token)) {
+    $CSRF_OK = is_string($token) && hash_equals($_SESSION['csrf'], $token);
+    // Phone alert buttons answer a reminder with its own token instead; act_reminder_act checks one or the other.
+    if (!$CSRF_OK && $action !== 'reminder_act') {
         fail('Your session expired. Reload the page and try again.', 419);
     }
     $ct = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -45,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $IN = $_GET;
 }
 
-$public = ['session', 'login'];
+$public = ['session', 'login', 'reminder_act'];
 $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
     'jobs_list', 'job_get', 'jobs_export', 'jobs_due', 'staff_profile', 'tools_list', 'tools_export', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
@@ -53,7 +56,7 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
     'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'memos_list', 'memo_get', 'memo_people',
-    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get'];
+    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get', 'reminders_mine'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -89,6 +92,7 @@ function public_config(array $me): array
         'currency'      => cfg('currency', '₦'),
         'today'         => today(),
         'poll'          => (int)cfg('poll_seconds', 10),
+        'remind'        => ['default' => due_reminder_settings()['offsets'], 'choices' => DUE_REMIND_CHOICES],
         'locations'     => location_options(),
         'categories'    => array_values(setting('expense_categories') ?: []),
         'credit_types'  => array_values(setting('credit_types') ?: []),
@@ -204,6 +208,7 @@ function act_pulse(array $in, array $me): void
         'memos'   => memo_badge($me),
         'notices' => notice_badge($me),
         'ideas'   => idea_badge($me),
+        'due_reminders' => due_reminders_for($me['id']),
     ] + job_badges($me);
     if (can_review_money($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();
@@ -213,6 +218,7 @@ function act_pulse(array $in, array $me): void
         }
     }
     maybe_run_reminders(); // fallback for hosts without a cron job
+    maybe_run_due_reminders();
     json_out($out);
 }
 

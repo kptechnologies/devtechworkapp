@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -671,6 +671,26 @@ function table_sql(): array
             created_at DATETIME NOT NULL,
             KEY idx_idea (idea_id)
         ) $t",
+        // v18: reminders before a job or task is due, one row per person per offset; offset 0 marks the auto-escalation
+        "CREATE TABLE IF NOT EXISTS due_reminders (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            kind VARCHAR(4) NOT NULL,
+            item_id INT UNSIGNED NOT NULL,
+            job_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            due_at DATETIME NOT NULL,
+            offset_min INT NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'sent',
+            sent_at DATETIME NULL,
+            snooze_until DATETIME NULL,
+            acted_at DATETIME NULL,
+            action VARCHAR(12) NOT NULL DEFAULT '',
+            token CHAR(32) NOT NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uq_item (kind, item_id, user_id, due_at, offset_min),
+            KEY idx_user (user_id, status),
+            KEY idx_snooze (status, snooze_until)
+        ) $t",
     ];
 }
 
@@ -743,6 +763,9 @@ function column_sql(): array
         ['tools', 'supplier', "VARCHAR(120) NOT NULL DEFAULT ''"],
         ['tools', 'warranty_until', 'DATE NULL'],
         ['tool_moves', 'items', "VARCHAR(300) NOT NULL DEFAULT ''"],
+        // v18: minutes before the due time to remind people; NULL uses the Settings default, '' turns reminders off
+        ['jobs', 'remind_offsets', 'VARCHAR(40) NULL'],
+        ['job_tasks', 'remind_offsets', 'VARCHAR(40) NULL'],
     ];
 }
 

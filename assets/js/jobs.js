@@ -69,6 +69,32 @@
     return min >= 0 ? { late: false, text: `${span(min)} left` } : { late: true, text: `Expired ${span(-min)} ago` };
   };
   /** "2h 10m left" / "Expired 40m ago" pill for an open item. */
+  /** "1 hr", "30 min", "1 day" for reminder offsets in minutes. */
+  const minLabel = (m) => (m >= 1440 && m % 1440 === 0 ? `${m / 1440} day${m === 1440 ? '' : 's'}` : m >= 60 ? `${Math.floor(m / 60)} hr${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`);
+  App.minLabel = minLabel;
+  /** Reminders before the due time: the Settings default, chosen times, or off. value is the saved column (null, '' or '60,30'). */
+  const remindField = (value) => {
+    const rm = App.cfg.remind || { default: [], choices: [] };
+    const mode = value === null || value === undefined ? 'default' : value === '' ? 'off' : 'custom';
+    const picked = new Set(String(value || '').split(',').filter(Boolean).map(Number));
+    const def = rm.default.length ? rm.default.map(minLabel).join(', ') + ' before' : 'none set';
+    return `<div class="field" data-remind><label for="rm-mode-${remindN}">Reminders</label>
+      <select id="rm-mode-${remindN++}" name="remind_mode">${App.opts([['default', `Default (${def})`], ['custom', 'Choose times'], ['off', 'Off']], mode)}</select>
+      <div class="opts ${mode === 'custom' ? '' : 'hide'}" data-remind-opts style="margin-top:8px">${rm.choices.map((m) => `<label class="opt">
+        <input type="checkbox" data-multi="1" name="remind_pick" value="${m}" ${picked.has(m) ? 'checked' : ''}><span>${esc(minLabel(m))} before</span></label>`).join('')}</div>
+      <div class="help">Everyone on it is reminded before it's due, and can snooze or escalate.</div></div>`;
+  };
+  let remindN = 0;
+  const bindRemind = (root) => $$('[data-remind]', root).forEach((f) => $('select', f).addEventListener('change', (e) =>
+    $('[data-remind-opts]', f).classList.toggle('hide', e.target.value !== 'custom')));
+  /** Turns the form's remind_mode / remind_pick into remind_offsets for the API. */
+  const takeRemind = (d) => {
+    if (!('remind_mode' in d)) return d;
+    d.remind_offsets = d.remind_mode === 'custom' ? ((d.remind_pick || []).length ? d.remind_pick.map(Number) : 'off') : d.remind_mode;
+    delete d.remind_mode;
+    delete d.remind_pick;
+    return d;
+  };
   App.timeLeftPill = (date, time) => { const t = App.timeLeft(date, time); return `<span class="pill ${t.late ? 'bad' : 'info'}" data-left="${esc(date || '')}|${esc(time || '')}"><i class="ti ti-hourglass"></i>${esc(t.text)}</span>`; };
   /** Keeps every time-left pill inside root current while it's on screen. */
   App.tickTimeLeft = (root) => {
@@ -296,13 +322,15 @@
       <div class="field"><label for="jt-n">Notes</label><textarea id="jt-n" name="notes" rows="2" placeholder="Details, materials, who to see">${esc(v.notes || '')}</textarea></div>
       <div class="form-row"><div class="field"><label for="jt-d">Due date <span class="req">*</span></label><input type="date" id="jt-d" name="due_date" value="${esc(v.due_date || '')}"></div>
         <div class="field"><label for="jt-h">Due time</label><input type="time" id="jt-h" name="due_time" value="${esc(v.due_time || '')}"></div></div>
+      ${remindField(t ? t.remind_offsets : null)}
       <div class="field" data-field="assignees"><div class="label">Who does it? <span class="req">*</span></div><div class="opts">${staff.map((s) => `<label class="opt">
         <input type="checkbox" data-multi="1" name="assignees" value="${s.id}" ${who.has(s.id) ? 'checked' : ''}><span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div>
         <div class="help">Anyone not on the job yet is added to it.</div></div></form>`,
     `<button class="btn ghost" data-close>Cancel</button>${t ? '' : '<button class="btn" id="jt-more">Save and add another</button>'}<button class="btn primary" id="jt-ok">Save task</button>`, { wide: true });
+    bindRemind(el);
     const save = async (btn, again) => {
       const form = $('#jt-form', el);
-      const d = App.formData(form);
+      const d = takeRemind(App.formData(form));
       const errs = {};
       if (!d.title.trim()) errs.title = 'Say what needs to be done.';
       if (!d.due_date) errs.due_date = 'Set a due date.';
@@ -587,6 +615,7 @@
         <div class="form-row"><div class="field"><label for="je-p">Priority</label><select id="je-p" name="priority">${App.opts(Object.entries(PRIORITY).map(([k, [l]]) => [k, l]), v.priority)}</select></div>
           <div class="field"><label for="je-due">Due date${admin ? ' <span class="req">*</span>' : ''}</label><input type="date" id="je-due" name="due_date" value="${esc(v.due_date || '')}"></div>
           <div class="field"><label for="je-dt">Due time</label><input type="time" id="je-dt" name="due_time" value="${esc(v.due_time || '')}"></div></div>
+        ${remindField(j ? j.remind_offsets : null)}
         ${staff.length ? `<div class="field"><div class="label">Assign to</div><div class="opts">${staff.map((s) => `<label class="opt"><input type="checkbox" data-multi="1" name="assignees" value="${s.id}" ${preset.has(s.id) ? 'checked' : ''}>
           <span><i class="ti ti-check" style="font-size:14px"></i>${esc(s.name)}</span></label>`).join('')}</div><div class="help">You can add more people or reassign later.</div></div>
         <div class="field"><div class="label">Tasks (optional)</div>
@@ -596,6 +625,7 @@
       </form>`, `<button class="btn ghost" data-close>Cancel</button>${!isNew && isAdmin() ? '<button class="btn danger" id="je-del"><i class="ti ti-trash"></i>Delete</button>' : ''}
         <button class="btn primary" id="je-save">${isNew ? (admin ? 'Create job' : 'Send to admin') : 'Save'}</button>`, { wide: true });
     const up = isNew ? App.uploader($('#je-up', el), { label: 'Add photo' }) : null;
+    bindRemind(el);
     // Task rows on a new job: title, due date/time and staff for each.
     let taskN = 0;
     $('#je-task-add', el)?.addEventListener('click', () => {
@@ -637,13 +667,14 @@
     }
     $('#je-save', el).addEventListener('click', async (e) => {
       const form = $('#je-form', el);
-      const d = App.formData(form);
+      const d = takeRemind(App.formData(form));
       if (!isNew) d.id = j.id;
       if (prefill?.source_report_id) d.source_report_id = prefill.source_report_id;
       if (staff.length) d.assignees = (d.assignees || []).map(Number);
       if (admin && !d.due_date && !['done', 'cancelled'].includes(j?.status)) { App.showErrors(form, { due_date: 'Set a due date so staff know the time frame.' }); return; }
       if (isNew && admin) {
-        d.tasks = readTasks();
+        // Tasks on a new job get the job's reminder choice; it can be changed per task later.
+        d.tasks = readTasks().map((t) => ({ ...t, remind_offsets: d.remind_offsets }));
         const bad = d.tasks.find((t) => !t.due_date || !t.assignees.length);
         if (bad) { toast(`Give "${bad.title}" a due date and at least one person.`, true); return; }
       }
