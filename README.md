@@ -19,8 +19,8 @@ A self-hosted web app for daily work reports, job orders, staff attendance, work
 7. **Set up email** (needed for follow-up reminders):
    - cPanel → *Email Accounts* → create e.g. `portal@yourdomain.com` → *Connect Devices* to see the SMTP host and port.
    - In the portal: **Settings → Email notifications**. Enter the host, port (465 = SSL), username and password, then **Send test email**.
-8. **Add the reminders cron job.** cPanel → *Cron Jobs* → *Once Per Hour*, command:
-   `php /home/YOUR_CPANEL_USER/public_html/cron.php` (use your real path; it's shown under **Settings → Follow-up reminders** together with a URL version for hosts that only allow URL cron jobs). Without a cron job, reminders still go out the first time someone opens the portal after the send time.
+8. **Add the reminders cron job.** cPanel → *Cron Jobs* → *Once Per Five Minutes* (`*/5 * * * *`), command:
+   `php /home/YOUR_CPANEL_USER/public_html/cron.php` (use your real path; it's shown under **Settings → Follow-up reminders** together with a URL version for hosts that only allow URL cron jobs). Every 5 minutes is needed for the reminders sent before a task is due (e.g. 1 hr and 30 min before); the daily digest still goes out once a day. Without a cron job, reminders only go out while someone has the portal open.
 
 ## First-day setup
 
@@ -207,7 +207,7 @@ Each staff profile shows contact, next-of-kin and bank details, responsibilities
 
 ```
 index.php        App page (sign-in + app)
-cron.php         Hourly reminders (run from cPanel Cron Jobs)
+cron.php         Reminders every 5 minutes (run from cPanel Cron Jobs)
 api.php          JSON API
 google.php       Google Tasks sign-in (OAuth redirect)
 sw.js            Service worker that shows phone alerts

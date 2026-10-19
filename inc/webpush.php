@@ -161,7 +161,7 @@ function webpush_send(array $sub, array $message): int
 }
 
 /** Push one alert to every phone these people turned alerts on for. Gone subscriptions are removed. */
-function push_to_users(array $userIds, string $title, string $body = '', string $link = ''): int
+function push_to_users(array $userIds, string $title, string $body = '', string $link = '', array $extra = []): int
 {
     $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds))));
     if (!$userIds) {
@@ -172,7 +172,8 @@ function push_to_users(array $userIds, string $title, string $body = '', string 
     $sent = 0;
     foreach ($subs as $s) {
         try {
-            $code = webpush_send($s, ['title' => $title, 'body' => mb_substr($body, 0, 240), 'link' => $link, 'tag' => $link ?: 'portal']);
+            $code = webpush_send($s, ['title' => $title, 'body' => mb_substr($body, 0, 240), 'link' => $link,
+                'tag' => isset($extra['rid']) ? 'rem-' . $extra['rid'] : ($link ?: 'portal')] + $extra);
             if (in_array($code, [404, 410], true)) {
                 q('DELETE FROM push_subscriptions WHERE id = ?', [$s['id']]);
             } elseif ($code >= 200 && $code < 300) {

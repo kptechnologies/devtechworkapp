@@ -229,6 +229,7 @@ function act_settings_get(array $in, array $me): void
         'require_signoff' => setting('require_signoff') !== false,
         'pay_rules' => pay_rules(),
         'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'cron_path' => dirname(__DIR__) . '/cron.php', 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
+        'due_reminders' => due_reminder_settings() + ['choices' => DUE_REMIND_CHOICES],
         'smtp' => $smtp,
         'google' => [
             'client_id' => google_cfg()['client_id'] ?? '',
@@ -288,6 +289,11 @@ function act_settings_save(array $in, array $me): void
         if (isset($in[$k])) {
             save_setting($k, (bool)$in[$k]);
         }
+    }
+    if (isset($in['due_reminders']) && is_array($in['due_reminders'])) {
+        $d = $in['due_reminders'];
+        save_setting('due_reminders', ['enabled' => !empty($d['enabled']), 'offsets' => clean_offsets($d['offsets'] ?? []),
+            'auto_escalate' => !empty($d['auto_escalate']), 'email' => !empty($d['email'])]);
     }
     if (isset($in['reminder_emails'])) {
         $emails = array_values(array_unique(array_filter(array_map(fn($x) => strtolower(str_in($x, 190)), (array)$in['reminder_emails']), 'strlen')));

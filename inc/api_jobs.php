@@ -248,6 +248,9 @@ function act_job_save(array $in, array $me): void
         'due_date' => valid_date($in['due_date'] ?? null) ? $in['due_date'] : null,
         'due_time' => time_in($in['due_time'] ?? null),
     ];
+    if (array_key_exists('remind_offsets', $in)) {
+        $v['remind_offsets'] = offsets_in($in['remind_offsets']);
+    }
     $errors = [];
     if ($admin && !$v['due_date'] && !in_array($job['status'] ?? '', ['done', 'cancelled'], true)) {
         $errors['due_date'] = 'Set a due date so staff know the time frame.';
@@ -786,6 +789,9 @@ function job_task_store(int $jobId, array $t, array $me, int $taskId = 0): array
         q('INSERT INTO job_tasks (job_id, title, notes, due_date, due_time, created_by, created_at) VALUES (?,?,?,?,?,?,NOW())',
             [$jobId, $title, $notes, $due, $time, $me['id']]);
         $taskId = (int)db()->lastInsertId();
+    }
+    if (array_key_exists('remind_offsets', $t)) {
+        q('UPDATE job_tasks SET remind_offsets = ? WHERE id = ?', [offsets_in($t['remind_offsets']), $taskId]);
     }
     $current = task_assignee_ids($taskId);
     $given = array_values(array_diff($who, $current));

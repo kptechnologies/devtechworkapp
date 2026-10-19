@@ -346,6 +346,8 @@
     const list = (k, label, help) => `<div class="field"><label for="se-${k}">${label}</label><textarea id="se-${k}" name="${k}" rows="6">${esc((s[k] || []).join('\n'))}</textarea><div class="help">${help}</div></div>`;
     const sm = s.smtp || {};
     const rm = s.reminders;
+    const dr = s.due_reminders;
+    const ml = (m) => (App.minLabel ? App.minLabel(m) : `${m} min`);
     const pr = s.pay_rules;
     const payField = (k, label, unit = 'money') => `<div class="field"><label for="se-pay-${k}">${label}${unit === 'money' ? ` (${esc(App.cfg.currency)})` : ''}</label><input type="number" id="se-pay-${k}" name="${k}" min="0" step="${unit === 'money' ? '0.01' : '1'}" value="${esc(pr[k])}"></div>`;
     ctx.el.innerHTML = `
@@ -406,6 +408,15 @@
           <div class="field"><label for="se-pay-ef">Rules apply from</label><input type="date" id="se-pay-ef" name="effective_from" value="${esc(pr.effective_from)}" style="max-width:220px">
             <div class="help">Days before this date are never charged.</div></div>
           <button class="btn primary" type="submit">Save pay rules</button></form>
+        <form class="card card-pad" id="se-due"><h3 style="margin-bottom:4px">Before-due reminders</h3>
+          <p class="muted small" style="margin-bottom:14px">Everyone on a task (or on a job with no tasks) is reminded before it's due, in the portal and on their phone.
+            They can say Got it, ask again in 10 minutes, snooze, or escalate to the job creator and managers. Each job or task can change these times or turn them off.</p>
+          <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="enabled" ${dr.enabled ? 'checked' : ''}><span>Send reminders before tasks are due</span></label>
+          <div class="field"><div class="label">Default reminder times</div><div class="opts">${dr.choices.map((m) => `<label class="opt">
+            <input type="checkbox" data-multi="1" name="offsets" value="${m}" ${dr.offsets.includes(m) ? 'checked' : ''}><span>${esc(ml(m))} before</span></label>`).join('')}</div></div>
+          <label class="check-row" style="margin-bottom:10px"><input type="checkbox" name="auto_escalate" ${dr.auto_escalate ? 'checked' : ''}><span>Escalate automatically when a task reaches its due time unfinished and nobody answered the reminder</span></label>
+          <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="email" ${dr.email ? 'checked' : ''}><span>Also email each reminder</span></label>
+          <button class="btn primary" type="submit">Save before-due reminders</button></form>
         <form class="card card-pad" id="se-rem"><h3 style="margin-bottom:4px">Follow-up reminders</h3>
           <p class="muted small" style="margin-bottom:14px">A daily email listing overdue, stalled, high-priority and unchecked jobs plus yesterday's lateness, so you can follow up before clients complain. Each staff member also gets their own list.</p>
           ${rm.mail_enabled ? '' : '<div class="note-box warn" style="margin-bottom:12px">Email is turned off. Turn on email notifications above, or reminders only show inside the portal.</div>'}
@@ -414,10 +425,10 @@
             <div class="field"><label for="se-sd">Flag jobs with no update for (days)</label><input type="number" id="se-sd" name="stale_days" min="1" max="60" value="${esc(rm.stale_days)}"></div></div>
           <div class="field"><label for="se-re">Also send to</label><textarea id="se-re" name="reminder_emails" rows="2" placeholder="operations@devtech.ng">${esc(rm.emails.join('\n'))}</textarea>
             <div class="help">One email per line. All admins get it automatically.</div></div>
-          <div class="note-box small" style="margin-bottom:14px;white-space:normal"><b>Set up a cron job</b> (cPanel → Cron Jobs → Once per hour) so reminders go out on time:<br>
+          <div class="note-box small" style="margin-bottom:14px;white-space:normal"><b>Set up a cron job</b> (cPanel → Cron Jobs → Every 5 minutes) so reminders go out on time:<br>
             <code style="word-break:break-all">/usr/local/bin/php ${esc(rm.cron_path)} &gt;/dev/null 2&gt;&amp;1</code>, or<br>
             <code style="word-break:break-all">${esc(location.origin + location.pathname.replace(/[^/]*$/, ''))}cron.php?key=${esc(rm.cron_key)}</code><br>
-            Without it, reminders are sent the first time someone opens the portal after the send time.${rm.last_run ? ` Last digest: ${esc(fmtDate(rm.last_run))}.` : ''}</div>
+            Without it, reminders are only sent while someone has the portal open.${rm.last_run ? ` Last digest: ${esc(fmtDate(rm.last_run))}.` : ''}</div>
           <div class="actions"><button class="btn primary" type="submit">Save reminders</button><button class="btn" type="button" id="se-rtest"><i class="ti ti-mail-forward"></i>Send digest now</button></div></form>
         <form class="card card-pad" id="se-faults"><h3 style="margin-bottom:4px">Maintenance faults</h3>
           <p class="muted small" style="margin-bottom:14px">The device list and fault checklist staff see when they report maintenance and repair work.</p>
@@ -438,6 +449,16 @@
     $('#se-pay', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
       try { await App.busy(e.submitter, () => api('settings_save', { data: { pay_rules: App.formData(e.target) } })); toast('Pay rules saved'); } catch (err) { App.fail(err); }
+    });
+    $('#se-due', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = App.formData(e.target);
+      const due = { enabled: d.enabled, offsets: (d.offsets || []).map(Number), auto_escalate: d.auto_escalate, email: d.email };
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: { due_reminders: due } }));
+        if (App.cfg.remind) App.cfg.remind.default = due.offsets.sort((a, b) => b - a);
+        toast('Before-due reminder settings saved');
+      } catch (err) { App.fail(err); }
     });
     $('#se-rem', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();

@@ -8,7 +8,8 @@ require_once __DIR__ . '/gtasks.php';
 
 /**
  * $via: 'push' => false skips the phone alert (on by default); 'gtasks' => true also adds a task to linked
- * Google Tasks lists, with 'due' => 'Y-m-d' when there is a due date.
+ * Google Tasks lists, with 'due' => 'Y-m-d' when there is a due date; 'push_data' adds fields to the phone alert
+ * (a reminder's rid and token turn on its Snooze and Escalate buttons).
  */
 function notify(array $userIds, string $type, string $title, string $body = '', string $link = '', bool $email = true, array $via = []): void
 {
@@ -20,7 +21,7 @@ function notify(array $userIds, string $type, string $title, string $body = '', 
         q('INSERT INTO notifications (user_id, type, title, body, link, created_at) VALUES (?,?,?,?,?,NOW())', [$uid, $type, $title, $body, $link]);
     }
     if ($via['push'] ?? true) {
-        after_response(fn() => push_to_users($userIds, $title, $body, $link));
+        after_response(fn() => push_to_users($userIds, $title, $body, $link, (array)($via['push_data'] ?? [])));
     }
     if (!empty($via['gtasks'])) {
         after_response(fn() => gtasks_to_users($userIds, $title, $body, (string)($via['due'] ?? ''), $link));

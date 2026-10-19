@@ -601,6 +601,46 @@
     });
   }
 
+  /* ---------------------------------------------- before-due reminders */
+  const remindersShown = new Set();
+  /** Shows the newest unanswered reminder, one at a time and never over something the user has open. */
+  function showDueReminders(list) {
+    if (App.hasOverlay()) return;
+    const r = (list || []).find((x) => !remindersShown.has(x.id));
+    if (!r) return;
+    remindersShown.add(r.id);
+    const answer = async (btn, data) => {
+      try {
+        const res = await App.busy(btn, () => api('reminder_act', { data: { id: r.id, ...data } }));
+        if (btn) closeTop();
+        toast(res.message);
+      } catch (err) { App.fail(err); }
+    };
+    const due = App.dueLabel ? App.dueLabel(r.due_date, r.due_time) : r.due_date;
+    const el = App.modal(`<i class="ti ti-alarm"></i> ${esc(r.when)}`,
+      `<p style="font-size:16px;margin-bottom:4px"><b>${esc(r.title)}</b></p>
+       <p class="muted" style="margin-bottom:12px">${r.kind === 'task' ? `Task on ${esc(r.ref)} ${esc(r.job_title)}` : esc(r.ref)}${r.client_name ? ' · ' + esc(r.client_name) : ''}<br>
+         Due ${esc(due)} ${App.timeLeftPill ? App.timeLeftPill(r.due_date, r.due_time) : ''}</p>
+       <div class="small muted" style="margin-bottom:6px">Remind me again</div>
+       <div class="actions" style="justify-content:flex-start;flex-wrap:wrap;gap:6px">
+         <button class="btn sm" data-snooze="10"><i class="ti ti-clock"></i>In 10 min</button>
+         <button class="btn sm" data-snooze="30">In 30 min</button>
+         <button class="btn sm" data-snooze="60">In 1 hr</button>
+         ${r.can_snooze_before ? '<button class="btn sm" data-snooze="before">15 min before it\'s due</button>' : ''}</div>`,
+      `<button class="btn ghost" id="rm-esc"><i class="ti ti-alert-triangle"></i>Escalate</button>
+       <button class="btn" id="rm-open">Open</button><button class="btn primary" id="rm-ok"><i class="ti ti-check"></i>Got it</button>`);
+    $$('[data-snooze]', el).forEach((b) => b.addEventListener('click', () => answer(b, { action: 'snooze', minutes: b.dataset.snooze })));
+    $('#rm-ok', el).addEventListener('click', (e) => answer(e.currentTarget, { action: 'ack' }));
+    $('#rm-open', el).addEventListener('click', () => { closeTop(); App.go('jobs/' + r.job_id); });
+    $('#rm-esc', el).addEventListener('click', async () => {
+      closeTop();
+      const reason = await App.confirm('Escalate this reminder', `The job creator and managers will be told you need help with <b>${esc(r.title)}</b>.`,
+        { ok: 'Escalate', danger: true, input: { label: 'What\'s holding it up?', required: true, requiredMsg: 'Say what you need help with.' } });
+      if (reason) answer(null, { action: 'escalate', reason });
+    });
+  }
+  App.showDueReminders = showDueReminders;
+
   /* ------------------------------------------------------------ polling */
   async function poll() {
     if (!App.user || document.hidden) return;
@@ -620,6 +660,7 @@
         App.current.refresh && App.current.refresh();
       }
       App.lastChange = p.change;
+      showDueReminders(p.due_reminders);
     } catch (e) {
       if (e.offline) $('#live-dot')?.classList.add('off');
     }
