@@ -152,6 +152,8 @@ Each staff member gets their own list (overdue, due soon, sent back, high priori
 
 **Clients** lists every school and company with its contact, GPS point, open and overdue jobs and unfixed device faults. Each client page shows open jobs, job history, client sign-offs, daily reports from that location and the full device repair history. The directory is filled from your schools list and existing jobs, and a job typed with a new client name adds that client automatically.
 
+**School documents:** each client page has a **Documents** tab for the school's timetable, school calendar, scheme of work, agreement and other papers (PDF, Word, Excel or a photo, one file per document with a title and type). Management uploads and removes them, from there or from the top of that school's **Timetable**; staff assigned to the school see them on their Timetable page, can open or download them, and are notified when a new one is added.
+
 ## Management roles
 
 Set a role under **Staff setup**. Every role below admin is still an employee: they clock in, file reports, have a wallet and appear on payroll like staff.

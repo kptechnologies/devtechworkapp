@@ -14,6 +14,7 @@ require __DIR__ . '/inc/api_queries.php';
 require __DIR__ . '/inc/api_lessons.php';
 require __DIR__ . '/inc/api_learning.php';
 require __DIR__ . '/inc/api_timetable.php';
+require __DIR__ . '/inc/api_school_docs.php';
 require __DIR__ . '/inc/api_memos.php';
 require __DIR__ . '/inc/api_notices.php';
 require __DIR__ . '/inc/api_ideas.php';
@@ -55,7 +56,7 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
-    'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'memos_list', 'memo_get', 'memo_people',
+    'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'school_docs_list', 'memos_list', 'memo_get', 'memo_people',
     'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get', 'reminders_mine'];
 
 $fn = 'act_' . $action;
@@ -241,6 +242,9 @@ function act_attachment_delete(array $in, array $me): void
     $a = q('SELECT * FROM attachments WHERE id = ?', [(int)($in['id'] ?? 0)])->fetch();
     if (!$a) {
         fail('File not found.', 404);
+    }
+    if ($a['owner_type'] === 'schooldoc') {
+        fail('Remove school documents from the school\'s Documents list.', 403);
     }
     if (!is_admin($me)) {
         if ((int)$a['user_id'] !== $me['id']) {

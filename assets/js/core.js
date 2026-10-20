@@ -303,6 +303,70 @@
     return { files: () => picked.slice(), count: () => picked.length, setExisting: (n) => { existing = n; } };
   };
 
+  /* ---------------------------------------------------- school documents */
+  App.fileIcon = (mime = '') => (mime.startsWith('image/') ? 'photo' : mime === 'application/pdf' ? 'file-type-pdf'
+    : /word/.test(mime) ? 'file-type-doc' : /excel|spreadsheet/.test(mime) ? 'file-type-xls' : 'file');
+  const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB');
+
+  /** A school's documents (timetable, calendar…) with upload and remove for management. where = { client_id } or { school }. */
+  App.schoolDocs = async (box, where, { compact = false } = {}) => {
+    const load = async () => {
+      let r;
+      try { r = await api('school_docs_list', { query: where }); } catch (e) { box.innerHTML = ''; return; }
+      const docs = r.docs.slice().sort((a, b) => (a.category === 'Timetable' ? 0 : 1) - (b.category === 'Timetable' ? 0 : 1));
+      if (compact && !docs.length && !r.can_edit) { box.innerHTML = ''; return; }
+      const add = r.can_edit ? `<button class="btn sm" data-sd-add><i class="ti ti-upload"></i>Upload document</button>` : '';
+      box.innerHTML = `<div class="card">${compact ? `<div class="card-pad" style="display:flex;gap:10px;align-items:center;padding-bottom:0">
+          <div style="font-weight:600;flex:1"><i class="ti ti-files"></i> School documents</div>${add}</div>`
+        : `<div class="card-pad" style="display:flex;justify-content:flex-end;padding-bottom:0">${add}</div>`}
+        ${docs.length ? `<ul class="list">${docs.map((d) => `<li class="li" data-sd-open="${d.file ? d.file.id : ''}">
+          <div class="li-icon tone-brand"><i class="ti ti-${App.fileIcon(d.file?.mime)}"></i></div>
+          <div class="main-col"><div class="t">${esc(d.title)}</div><div class="s">${esc(d.category)} · ${esc(fmtDate(d.created_at, false))}${d.user_name ? ' · ' + esc(d.user_name) : ''}${d.file ? ' · ' + kb(d.file.size) : ''}</div></div>
+          ${d.file ? `<a class="icon-btn" href="file.php?id=${d.file.id}&download=1" title="Download" aria-label="Download ${esc(d.title)}"><i class="ti ti-download"></i></a>` : ''}
+          ${r.can_edit ? `<button class="icon-btn" data-sd-del="${d.id}" title="Remove" aria-label="Remove ${esc(d.title)}"><i class="ti ti-trash"></i></button>` : ''}</li>`).join('')}</ul>`
+        : App.empty('files', 'No documents yet', r.can_edit ? 'Upload the school\'s timetable, calendar or other documents (PDF, Word or Excel).' : '')}</div>`;
+      $$('[data-sd-open]', box).forEach((li) => li.addEventListener('click', (e) => {
+        if (e.target.closest('a,button') || !li.dataset.sdOpen) return;
+        window.open(`file.php?id=${li.dataset.sdOpen}`, '_blank', 'noopener');
+      }));
+      $$('[data-sd-del]', box).forEach((b) => b.addEventListener('click', async () => {
+        if (!(await App.confirm('Remove document?', 'Staff will no longer see this document.', { ok: 'Remove', danger: true }))) return;
+        try { await api('school_doc_delete', { data: { id: +b.dataset.sdDel } }); toast('Document removed'); load(); } catch (err) { App.fail(err); }
+      }));
+      $('[data-sd-add]', box)?.addEventListener('click', () => upload(r));
+    };
+    const upload = (r) => {
+      const max = App.cfg?.max_mb || 8;
+      const el = App.modal(`Upload document · ${esc(r.school)}`, `<form id="sd-form" novalidate>
+        <div class="field" data-field="doc"><label for="sd-f">File <span class="req">*</span></label>
+          <input id="sd-f" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*">
+          <div class="help">PDF, Word, Excel or a photo · up to ${max}MB</div></div>
+        <div class="field"><label for="sd-t">Title</label><input id="sd-t" name="title" maxlength="190" placeholder="e.g. 2026/27 First term timetable"></div>
+        <div class="field"><label for="sd-c">Type</label><select id="sd-c" name="category">${App.opts(r.categories, 'Timetable')}</select></div>
+        </form>`, `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="sd-ok"><i class="ti ti-upload"></i>Upload</button>`);
+      const input = $('#sd-f', el);
+      input.addEventListener('change', () => {
+        const t = $('#sd-t', el);
+        if (input.files[0] && !t.value) t.value = input.files[0].name.replace(/\.\w+$/, '');
+      });
+      $('#sd-ok', el).addEventListener('click', async (e) => {
+        const form = $('#sd-form', el);
+        let file = input.files[0];
+        if (!file) { App.showErrors(form, { doc: 'Choose a file.' }); return; }
+        file = await compressImage(file);
+        if (file.size > max * 1024 * 1024) { App.showErrors(form, { doc: `This file is larger than ${max}MB.` }); return; }
+        try {
+          await App.busy(e.currentTarget, () => api('school_doc_save', { data: { ...App.formData(form), client_id: r.client_id }, files: [{ field: 'doc', file }] }));
+          App.closeTop();
+          toast('Document uploaded');
+          load();
+        } catch (err) { App.showErrors(form, err.fields); App.fail(err); }
+      });
+    };
+    box.innerHTML = compact ? '' : App.loading();
+    await load();
+  };
+
   /* ------------------------------------------------------------- charts */
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   App.palette = () => [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--chart-${i}`));
