@@ -506,7 +506,7 @@
         { href: 'reports', icon: 'clipboard-text', text: 'Work reports', mobile: true },
         { href: 'lessons', icon: 'school', text: 'Lessons', badge: 'lessons' },
         { href: 'timetable', icon: 'calendar-time', text: 'Timetables' },
-        { href: 'attendance', icon: 'clock-check', text: 'Attendance' },
+        { href: 'attendance', icon: 'clock-check', text: 'Attendance', badge: 'attendance' },
         { href: 'clients', icon: 'building-community', text: 'Clients' },
         { href: 'issues', icon: 'layout-kanban', text: 'Issues board' },
         { label: 'Setup' },
@@ -658,6 +658,7 @@
     if ('memos' in p) App.badges.memos = p.memos;
     if ('notices' in p) App.badges.notices = p.notices;
     if ('ideas' in p) App.badges.ideas = p.ideas;
+    if ('clock_problems' in p) App.badges.attendance = p.clock_problems;
     $$('[data-badge]').forEach((b) => {
       const n = App.badges[b.dataset.badge] || 0;
       b.textContent = n;

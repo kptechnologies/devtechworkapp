@@ -122,6 +122,8 @@ The portal works as an attendance machine. Staff tap **Clock in** when they arri
 - **A reason** is required when clocking in after the start time (plus the grace period) or clocking out before the end time.
 - If location can't be read at all, staff can still clock in by saying where they are; the record is flagged "No GPS" for the admin.
 
+**Clock-in problems.** Every refused clock-in or clock-out is saved with the reason (no location, weak GPS signal, old location reading, phone clock wrong, old selfie and so on), the accuracy and GPS age the phone reported, and the phone and browser it came from. Admins see them under **Attendance → Clock-in problems**: a summary per staff member, then each attempt with what to tell them to fix. The Attendance menu shows how many staff had a refusal today. Records are kept for 180 days. If the page warns that the portal is on plain HTTP, turn on SSL and the HTTPS redirect in `.htaccess`: phones won't share location or open the camera without it.
+
 The portal names the nearest client site and the distance. An hour after closing time, anyone still clocked in is reminded; after midnight, forgotten clock-outs are marked **No clock-out**.
 
 **Attendance → Clock-ins** shows the daily register (who's in, late, left early, selfies, map links, reasons). **Attendance → Report** gives each staff member's days present and absent, late days and minutes late, average arrival time, early leaves, missed clock-outs, hours worked and punctuality for any date range, with a colour-coded calendar per person and a CSV export. Staff see their own report under **My attendance**. Admins can correct a time or add one manually with a reason, which is flagged and kept in the audit log.

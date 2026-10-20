@@ -18,6 +18,7 @@ require __DIR__ . '/inc/api_school_docs.php';
 require __DIR__ . '/inc/api_memos.php';
 require __DIR__ . '/inc/api_notices.php';
 require __DIR__ . '/inc/api_ideas.php';
+require __DIR__ . '/inc/api_clock_problems.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/due_reminders.php';
 require __DIR__ . '/inc/import.php';
@@ -57,7 +58,8 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'company_wallet', 'company_txn_get', 'company_export', 'projects_list', 'project_get', 'contractors_list', 'contractor_get', 'queries_list', 'query_get',
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
     'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'school_docs_list', 'memos_list', 'memo_get', 'memo_people',
-    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get', 'reminders_mine'];
+    'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get', 'reminders_mine',
+    'clock_problems'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {
@@ -216,10 +218,12 @@ function act_pulse(array $in, array $me): void
         $out['pending_requests'] = (int)q("SELECT COUNT(*) FROM fund_requests WHERE status='pending'")->fetchColumn();
         if (is_admin($me)) {
             $out['pending_overtime'] = count(payroll_overtime_pending());
+            $out['clock_problems'] = (int)q('SELECT COUNT(DISTINCT user_id) FROM location_events WHERE created_at >= ?', [today()])->fetchColumn();
         }
     }
     maybe_run_reminders(); // fallback for hosts without a cron job
     maybe_run_due_reminders();
+    maybe_clock_problems_cleanup();
     json_out($out);
 }
 

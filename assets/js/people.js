@@ -381,17 +381,41 @@
   const flagPills = (flags) => String(flags || '').split(',').filter(Boolean).map((f) => `<span class="pill out" title="${esc(FLAG_TEXT[f] || f)}">${esc(FLAG_TEXT[f] || f)}</span>`).join(' ');
   const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 
+  /** Why a clock-in/out was refused, in plain words, with what the staff member should do. Phone problems first. */
+  const PROBLEM = {
+    no_gps: ['No location', 'phone', 'Location is off or blocked for the portal, or the browser can\'t share it. Turn on Location and allow it for this site.'],
+    low_accuracy: ['Weak GPS signal', 'phone', 'Accuracy was worse than 200m. Move outside or near a window; on Android turn on "Use precise location".'],
+    stale_gps: ['Old location reading', 'phone', 'The phone gave a saved location instead of a fresh one. The portal retries once by itself.'],
+    clock_skew: ['Phone clock wrong', 'phone', 'Turn on automatic date & time in the phone settings.'],
+    old_selfie: ['Old selfie', 'form', 'A photo from the gallery was used instead of a new selfie.'],
+    selfie: ['No selfie', 'form', 'The selfie wasn\'t taken or didn\'t upload.'],
+    reload: ['Page out of date', 'form', 'The page needs reloading.'],
+    location: ['No school chosen', 'form', ''], late_reason: ['Late, no reason', 'form', ''], early_reason: ['Early, no reason', 'form', ''],
+    work_tag: ['No work note', 'form', ''], jobs_due: ['Job orders still due', 'form', ''], jobs_due_here: ['Job orders due here', 'form', ''],
+  };
+  /** "Android 13 · Samsung Internet", "iPhone iOS 17.4 · Safari" from a user agent. */
+  const phoneOf = (ua = '') => {
+    const m = (re) => (ua.match(re) || [])[1] || '';
+    const os = /iPhone|iPad/.test(ua) ? `${/iPad/.test(ua) ? 'iPad' : 'iPhone'} iOS ${m(/OS (\d+(?:_\d+)?)/).replace('_', '.')}`
+      : /Android/.test(ua) ? `Android ${m(/Android (\d+(?:\.\d+)?)/)}` : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+    const br = /FBAN|FBAV/.test(ua) ? 'Facebook app' : /Instagram/.test(ua) ? 'Instagram app' : /; wv\)/.test(ua) ? 'In-app browser'
+      : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Edg/.test(ua) ? 'Edge' : /OPR|Opera/.test(ua) ? 'Opera' : /CriOS|Chrome/.test(ua) ? 'Chrome'
+        : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : '';
+    return [os, br].filter(Boolean).join(' · ') || 'Unknown phone';
+  };
+
   App.route('attendance', async (ctx) => {
     const admin = isManagement();
     const staff = admin ? (await api('users_list')).items.filter((u) => u.active) : [];
     const t = App.cfg.today;
     let tab = App.store.get('dt-attab', admin ? 'register' : 'report');
+    if (tab === 'problems' && !isAdmin()) tab = 'register';
     const st = { from: admin ? t : t.slice(0, 8) + '01', to: t, user_id: '' };
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>${admin ? 'Attendance' : 'My attendance'}</h1>
         <p class="muted">Work hours ${esc(App.cfg.work_start)}–${esc(App.cfg.work_end)}${App.cfg.late_grace ? ` · ${App.cfg.late_grace} min grace` : ''}. Clock-ins after the start time are marked late.</p></div>
         <div class="actions">${admin ? '<a class="btn" id="at-export"><i class="ti ti-download"></i>Export CSV</a>' + (isAdmin() ? '<button class="btn primary" id="at-add"><i class="ti ti-plus"></i>Add manually</button>' : '') : ''}</div></div>
-      <div class="seg" id="at-tabs" style="margin-bottom:12px"><button data-t="register"><i class="ti ti-list"></i> Clock-ins</button><button data-t="report"><i class="ti ti-chart-bar"></i> Report</button></div>
+      <div class="seg" id="at-tabs" style="margin-bottom:12px"><button data-t="register"><i class="ti ti-list"></i> Clock-ins</button><button data-t="report"><i class="ti ti-chart-bar"></i> Report</button>${isAdmin() ? '<button data-t="problems"><i class="ti ti-map-pin-off"></i> Clock-in problems</button>' : ''}</div>
       <div class="filters" id="at-filters">
         <label class="small muted" style="display:flex;gap:6px;align-items:center">From <input type="date" name="from" value="${st.from}" style="width:auto"></label>
         <label class="small muted" style="display:flex;gap:6px;align-items:center">To <input type="date" name="to" value="${st.to}" style="width:auto"></label>
@@ -403,6 +427,33 @@
     const setExport = () => {
       const exp = $('#at-export', ctx.el);
       if (exp) exp.href = `api.php?action=${tab === 'report' ? 'attendance_report_export' : 'attendance_export'}&` + new URLSearchParams(Object.entries(st).filter(([, v]) => v)).toString();
+    };
+
+    const loadProblems = async () => {
+      const r = await api('clock_problems', { query: st });
+      const body = $('#at-body', ctx.el);
+      const label = (c) => (PROBLEM[c] || [c])[0];
+      const phoneN = r.items.filter((x) => PROBLEM[x.code]?.[1] === 'phone').length;
+      body.innerHTML = `${location.protocol !== 'https:' && location.hostname !== 'localhost' ? `<div class="note-box bad" style="margin-bottom:12px"><i class="ti ti-lock-open"></i>
+          <b>The portal is open on plain HTTP.</b> Phones refuse to share location and open the camera on HTTP pages. Turn on SSL and the HTTPS redirect in .htaccess.</div>` : ''}
+        <p class="muted small" style="margin-bottom:12px">Every refused clock-in or clock-out is saved here with the reason the phone gave, so you can check "my location doesn't work".
+          ${r.items.length ? `${phoneN} of ${r.items.length} were phone or location problems.` : ''}</p>
+        ${r.summary.length ? `<div class="card" style="margin-bottom:14px"><div class="table-wrap"><table class="tbl"><thead><tr><th>Staff</th><th class="r">Refused</th><th>Reasons</th><th class="hide-sm">Phone / browser</th><th class="hide-sm">Last</th></tr></thead><tbody>
+          ${r.summary.map((x) => `<tr class="click" data-user="${x.user_id}"><td><b>${esc(x.name)}</b></td><td class="r num">${x.count}</td>
+            <td><div class="chips">${Object.entries(x.codes).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<span class="pill ${PROBLEM[c]?.[1] === 'phone' ? 'out' : ''}">${esc(label(c))} × ${n}</span>`).join('')}</div></td>
+            <td class="small hide-sm">${esc(phoneOf(x.user_agent))}</td><td class="small hide-sm">${esc(ago(x.last))}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>When</th><th>Staff</th><th>Problem</th><th class="hide-sm">Details</th></tr></thead><tbody>
+          ${r.items.map((x) => { const pr = PROBLEM[x.code]; return `<tr><td class="num small">${esc(fmtDateTime(x.created_at))}</td><td>${esc(x.user_name)}<div class="faint small">Clock ${x.kind === 'clock_out' ? 'out' : 'in'}</div></td>
+            <td><span class="pill ${pr?.[1] === 'phone' ? 'out' : ''}">${esc(label(x.code))}</span>${pr?.[2] ? `<div class="small muted" style="margin-top:4px">${esc(pr[2])}</div>` : ''}</td>
+            <td class="small hide-sm">${[x.acc !== null ? `Accuracy ±${x.acc}m` : '', x.gps_age !== null ? `GPS reading ${x.gps_age}s old` : '', x.skew !== null && Math.abs(x.skew) > 60 ? `Phone clock off by ${Math.round(Math.abs(x.skew) / 60)} min` : ''].filter(Boolean).map(esc).join('<br>')}
+              <div class="faint">${esc(phoneOf(x.user_agent))}</div></td></tr>`; }).join('')}</tbody></table></div>`
+          : App.empty('map-pin-check', 'No refused clock-ins', 'Nobody had a clock-in or clock-out refused in this period.')}</div>`;
+      $$('[data-user]', body).forEach((tr) => tr.addEventListener('click', () => {
+        st.user_id = tr.dataset.user;
+        const sel = $('[name=user_id]', ctx.el);
+        if (sel) sel.value = st.user_id;
+        load().catch(App.fail);
+      }));
     };
 
     const loadRegister = async () => {
@@ -470,8 +521,8 @@
       $$('#at-tabs button', ctx.el).forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
       setExport();
       const ex = $('#at-export', ctx.el);
-      if (ex) ex.classList.toggle('hide', false);
-      return tab === 'report' ? loadReport() : loadRegister();
+      if (ex) ex.classList.toggle('hide', tab === 'problems');
+      return tab === 'problems' ? loadProblems() : tab === 'report' ? loadReport() : loadRegister();
     };
     $$('#at-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; App.store.set('dt-attab', tab); load().catch(App.fail); }));
     $('#at-filters', ctx.el).addEventListener('change', (e) => {

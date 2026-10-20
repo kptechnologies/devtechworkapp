@@ -18,6 +18,7 @@ require __DIR__ . '/inc/api_learning.php';
 require __DIR__ . '/inc/api_timetable.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/due_reminders.php';
+require __DIR__ . '/inc/api_clock_problems.php';
 
 $cli = PHP_SAPI === 'cli';
 if (!$cli) {
@@ -30,5 +31,6 @@ if (!$cli) {
 }
 ensure_schema();
 $force = $cli ? in_array('--force', $argv ?? [], true) : !empty($_GET['force']);
+maybe_clock_problems_cleanup();
 $log = array_merge(run_due_reminders(), run_reminders($force));
 echo date('Y-m-d H:i') . ' ' . ($log ? implode(' ', $log) : 'Nothing due.') . "\n";

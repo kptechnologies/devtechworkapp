@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -700,6 +700,21 @@ function table_sql(): array
             user_id INT UNSIGNED NULL,
             created_at DATETIME NOT NULL,
             KEY idx_client (client_id)
+        ) $t",
+        // v21: failed clock-in/out attempts with the reason and the phone's GPS details, so "my phone doesn't work" can be checked
+        "CREATE TABLE IF NOT EXISTS location_events (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            kind VARCHAR(20) NOT NULL,
+            code VARCHAR(30) NOT NULL DEFAULT '',
+            message VARCHAR(500) NOT NULL DEFAULT '',
+            acc INT NULL,
+            gps_age INT NULL,
+            skew INT NULL,
+            user_agent VARCHAR(400) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            KEY idx_user_time (user_id, created_at),
+            KEY idx_created (created_at)
         ) $t",
     ];
 }
