@@ -694,6 +694,15 @@ function act_attendance_today(array $in, array $me): void
 /** Rejects a clock-in/out with a code the app uses to retry or explain. */
 function clock_fail(string $code, string $message, array $extra = []): void
 {
+    // Kept so admins can see why someone couldn't clock in (Attendance → Clock-in problems), with the GPS details the phone sent.
+    $in = $GLOBALS['IN'] ?? [];
+    $me = current_user();
+    if ($me) {
+        $client = is_numeric($in['client_ts'] ?? null) ? (float)$in['client_ts'] / 1000 : null;
+        $gpsAge = $client !== null && is_numeric($in['gps_ts'] ?? null) ? (int)round($client - (float)$in['gps_ts'] / 1000) : null;
+        log_location_event($me, 'clock_' . (($in['action'] ?? '') === 'out' ? 'out' : 'in'), $code, $message,
+            is_numeric($in['acc'] ?? null) ? (int)$in['acc'] : null, $gpsAge, $client !== null ? (int)round($client - time()) : null);
+    }
     json_out(['ok' => false, 'error' => $message, 'code' => $code] + $extra, 422);
 }
 

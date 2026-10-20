@@ -435,7 +435,20 @@ img.avatar { object-fit: cover; padding: 0; }
 .tl-complete .tl-dot { background: var(--in-soft); color: var(--in); }
 .tl-status .tl-dot, .tl-assign .tl-dot { background: var(--brand-soft); color: var(--brand-text); }
 .tl-followup .tl-dot { background: var(--info-soft); color: var(--info); }
-.tl-body { min-width: 0; flex: 1; padding-top: 3px; }
+.tl-body { min-width: 0; flex: 1; padding-top: 3px; overflow-wrap: anywhere; }
+.tl-text { white-space: pre-wrap; }
+
+/* Links to videos and pictures (Drive, YouTube…) */
+.link-add { display: flex; gap: 6px; }
+.link-add input { flex: 1; min-width: 0; }
+.link-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.link-list:empty { display: none; }
+.link-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 13px; text-decoration: none; }
+a.link-chip:hover { border-color: var(--brand); color: var(--brand-text); }
+.link-chip .link-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-chip .ti { font-size: 15px; flex-shrink: 0; }
+.link-rm { border: 0; background: none; padding: 0; color: var(--text-2); cursor: pointer; display: grid; place-items: center; }
+.link-rm:hover { color: var(--bad); }
 
 /* Client sign-off */
 .sigpad { display: block; width: 100%; height: 170px; border: 1px dashed var(--border-2); border-radius: var(--radius); background: #fff; touch-action: none; cursor: crosshair; }
