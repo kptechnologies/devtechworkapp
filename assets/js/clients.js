@@ -41,7 +41,7 @@
   }, { title: 'Clients', admin: true, live: true });
 
   const CTABS = [['open', 'Open jobs', 'clipboard-list'], ['history', 'Job history', 'history'], ['signoffs', 'Sign-offs', 'signature'],
-    ['reports', 'Reports', 'clipboard-text'], ['devices', 'Device faults', 'device-laptop'], ['notes', 'Notes', 'notes']];
+    ['reports', 'Reports', 'clipboard-text'], ['devices', 'Device faults', 'device-laptop'], ['docs', 'Documents', 'files'], ['notes', 'Notes', 'notes']];
 
   App.route('clients/:id', async (ctx) => {
     let tab = 'open';
@@ -98,6 +98,10 @@
               <td class="small hide-sm">${esc(d.action || '')}${d.parts ? `<div class="faint">Parts: ${esc(d.parts)}</div>` : ''}</td>
               <td><span class="pill ${App.deviceTone(d.status)}">${esc(d.status || '—')}</span>${d.priority === 'Urgent' || d.priority === 'High' ? ` <span class="pill ${d.priority === 'Urgent' ? 'bad' : 'out'}">${esc(d.priority)}</span>` : ''}</td></tr>`).join('')}
             </tbody></table></div>` : App.empty('device-laptop', 'No device repairs logged here')}</div>`;
+        } else if (tab === 'docs') {
+          body.innerHTML = '';
+          App.schoolDocs(body, { client_id: c.id });
+          return;
         } else {
           html = `<div class="card card-pad">${c.notes ? `<p style="white-space:pre-wrap">${esc(c.notes)}</p>` : '<p class="faint">No notes. Use Edit to add access instructions, gate codes, lab locations and so on.</p>'}</div>`;
         }

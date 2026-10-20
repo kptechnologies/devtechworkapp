@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -690,6 +690,16 @@ function table_sql(): array
             UNIQUE KEY uq_item (kind, item_id, user_id, due_at, offset_min),
             KEY idx_user (user_id, status),
             KEY idx_snooze (status, snooze_until)
+        ) $t",
+        // v19: documents kept for each school (timetable, calendar, scheme of work...); the file is an attachment of type 'schooldoc'
+        "CREATE TABLE IF NOT EXISTS school_docs (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            client_id INT UNSIGNED NOT NULL,
+            title VARCHAR(190) NOT NULL,
+            category VARCHAR(40) NOT NULL DEFAULT 'Other',
+            user_id INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_client (client_id)
         ) $t",
     ];
 }

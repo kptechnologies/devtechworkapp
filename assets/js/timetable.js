@@ -22,6 +22,7 @@
         <div class="actions"><button class="btn primary" id="tt-add"><i class="ti ti-plus"></i>Add period</button></div></div>
       <div class="seg scroll" id="tt-tabs" style="margin-bottom:12px"><button data-v="school">School timetable</button><button data-v="mine">My week</button></div>
       <div class="filters" id="tt-filters"></div>
+      <div id="tt-docs" style="margin-bottom:12px"></div>
       <div id="tt-body">${App.loading()}</div>`;
     let data = null;
     const load = async () => {
@@ -31,6 +32,9 @@
       $('#tt-filters', ctx.el).innerHTML = st.view === 'school' && data.schools.length
         ? `<select id="tt-school" aria-label="School">${App.opts(data.schools, st.school)}</select>` : '';
       $('#tt-school', ctx.el)?.addEventListener('change', (e) => { st.school = e.target.value; load().catch(App.fail); });
+      const docs = $('#tt-docs', ctx.el);
+      if (st.view === 'school' && st.school) App.schoolDocs(docs, { school: st.school }, { compact: true });
+      else docs.innerHTML = '';
       draw();
     };
     const draw = () => {

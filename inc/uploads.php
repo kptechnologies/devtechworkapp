@@ -12,6 +12,30 @@ const UPLOAD_TYPES = [
     'application/pdf' => 'pdf',
 ];
 
+/** School documents also take Word and Excel files. */
+const DOC_TYPES = UPLOAD_TYPES + [
+    'application/msword' => 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+    'application/vnd.ms-excel' => 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+];
+
+/** The file's real type. Office files are often detected only as a zip or OLE container, so those go by their extension. */
+function upload_mime(array $f, array $types): string
+{
+    $mime = (string)(new finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']);
+    $ext = strtolower(pathinfo((string)$f['name'], PATHINFO_EXTENSION));
+    $byExt = array_flip($types)[$ext] ?? null;
+    $containers = [
+        'application/zip' => ['docx', 'xlsx'], 'application/octet-stream' => ['docx', 'xlsx', 'doc', 'xls'],
+        'application/CDF-V2' => ['doc', 'xls'], 'application/x-ole-storage' => ['doc', 'xls'], 'application/vnd.ms-office' => ['doc', 'xls'],
+    ];
+    if ($byExt && !isset($types[$mime]) && in_array($ext, $containers[$mime] ?? [], true)) {
+        return $byExt;
+    }
+    return $mime;
+}
+
 /** Normalise $_FILES[$field] (single or multiple) into a list. */
 function uploaded_files(string $field = 'files'): array
 {
@@ -30,7 +54,7 @@ function uploaded_files(string $field = 'files'): array
 }
 
 /** Validate every file first; returns an error message or null. */
-function check_uploads(string $field = 'files', int $existing = 0): ?string
+function check_uploads(string $field = 'files', int $existing = 0, array $types = UPLOAD_TYPES): ?string
 {
     $files = uploaded_files($field);
     $max = (int)cfg('upload_max_files', 6);
@@ -38,7 +62,6 @@ function check_uploads(string $field = 'files', int $existing = 0): ?string
         return "You can attach up to $max files.";
     }
     $maxBytes = (int)cfg('upload_max_mb', 8) * 1024 * 1024;
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
     foreach ($files as $f) {
         if ($f['error'] !== UPLOAD_ERR_OK) {
             return 'Upload failed for ' . $f['name'] . ' (error ' . $f['error'] . ').';
@@ -46,9 +69,9 @@ function check_uploads(string $field = 'files', int $existing = 0): ?string
         if ($f['size'] > $maxBytes) {
             return $f['name'] . ' is larger than ' . cfg('upload_max_mb', 8) . 'MB.';
         }
-        $mime = $finfo->file($f['tmp_name']);
-        if (!isset(UPLOAD_TYPES[$mime])) {
-            return $f['name'] . ' isn\'t a supported file. Use JPG, PNG, WEBP, GIF or PDF.';
+        $mime = upload_mime($f, $types);
+        if (!isset($types[$mime])) {
+            return $f['name'] . ' isn\'t a supported file. Use ' . ($types === UPLOAD_TYPES ? 'JPG, PNG, WEBP, GIF or PDF.' : 'PDF, Word, Excel or a photo.');
         }
         if (str_starts_with($mime, 'image/') && @getimagesize($f['tmp_name']) === false) {
             return $f['name'] . ' isn\'t a valid image.';
@@ -57,18 +80,17 @@ function check_uploads(string $field = 'files', int $existing = 0): ?string
     return null;
 }
 
-function save_uploads(string $ownerType, int $ownerId, int $userId, string $field = 'files'): array
+function save_uploads(string $ownerType, int $ownerId, int $userId, string $field = 'files', array $types = UPLOAD_TYPES): array
 {
     $saved = [];
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
     $sub = date('Y/m');
     $dir = APP_ROOT . '/uploads/' . $sub;
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
         throw new RuntimeException('Cannot create upload folder.');
     }
     foreach (uploaded_files($field) as $f) {
-        $mime = $finfo->file($f['tmp_name']);
-        $ext = UPLOAD_TYPES[$mime] ?? null;
+        $mime = upload_mime($f, $types);
+        $ext = $types[$mime] ?? null;
         if (!$ext) {
             continue;
         }

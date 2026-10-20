@@ -2,6 +2,7 @@
 declare(strict_types=1);
 /* Serves attachments only to their owner or an admin. ?id=123[&thumb=1][&download=1] */
 require __DIR__ . '/inc/bootstrap.php';
+require __DIR__ . '/inc/api_school_docs.php';
 start_session();
 ensure_schema();
 
@@ -21,6 +22,11 @@ $managerFile = (is_management($me) && in_array($a['owner_type'], ['report', 'att
     || (can_review_money($me) && in_array($a['owner_type'], ['txn', 'request'], true));
 // The ideas board is open to everyone, so its photos are too.
 $managerFile = $managerFile || $a['owner_type'] === 'idea';
+// School documents: management, and staff assigned to that school.
+if ($a['owner_type'] === 'schooldoc') {
+    $school = q('SELECT c.name FROM school_docs d JOIN clients c ON c.id = d.client_id WHERE d.id = ?', [$a['owner_id']])->fetchColumn();
+    $managerFile = $school !== false && school_doc_can_view((string)$school, $me);
+}
 if (!is_admin($me) && !$managerFile) {
     $owner = match ($a['owner_type']) {
         'report'  => q('SELECT user_id FROM reports WHERE id = ?', [$a['owner_id']])->fetchColumn(),
@@ -58,7 +64,7 @@ if (!$path || !$base || !str_starts_with($path, $base) || !is_file($path)) {
     exit('File missing.');
 }
 $mime = $thumb ? 'image/jpeg' : $a['mime'];
-if (!isset(UPLOAD_TYPES[$mime])) {
+if (!isset(DOC_TYPES[$mime])) {
     $mime = 'application/octet-stream';
 }
 $name = preg_replace('/[^\w.\- ]+/u', '_', $a['original_name']);
@@ -67,5 +73,7 @@ header('Content-Length: ' . filesize($path));
 header('X-Content-Type-Options: nosniff');
 header("Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
 header('Cache-Control: private, max-age=86400');
-header('Content-Disposition: ' . (!empty($_GET['download']) ? 'attachment' : 'inline') . '; filename="' . $name . '"');
+// Word and Excel files can't be shown in the browser, so they always download.
+$inline = empty($_GET['download']) && (str_starts_with($mime, 'image/') || $mime === 'application/pdf');
+header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . $name . '"');
 readfile($path);
