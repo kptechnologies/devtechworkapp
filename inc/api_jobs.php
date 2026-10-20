@@ -85,6 +85,34 @@ function job_log(int $jobId, string $kind, string $body, ?int $reportId = null, 
     return $id;
 }
 
+/** Up to 10 web links (http/https) from the request, cleaned and de-duplicated. */
+function job_links_in($raw): array
+{
+    $out = [];
+    foreach (is_array($raw) ? $raw : [] as $url) {
+        $url = str_in(is_string($url) ? $url : '', 1000);
+        if ($url !== '' && !preg_match('~^https?://~i', $url)) {
+            $url = 'https://' . $url;
+        }
+        if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL) || !preg_match('~^https?://~i', $url)) {
+            fail('One of the links is not a web address. Paste the full link, e.g. https://drive.google.com/…');
+        }
+        $out[$url] = true;
+    }
+    if (count($out) > 10) {
+        fail('Add up to 10 links at a time.');
+    }
+    return array_keys($out);
+}
+
+/** Saves the links shared on a timeline entry. */
+function job_log_links(int $noteId, array $links): void
+{
+    if ($links) {
+        q('UPDATE job_updates SET links = ? WHERE id = ?', [json_encode($links, JSON_UNESCAPED_SLASHES), $noteId]);
+    }
+}
+
 /** Comma list of names for notifications and the timeline. */
 function user_names(array $ids): string
 {
@@ -205,11 +233,12 @@ function act_job_get(array $in, array $me): void
     $j = load_job((int)($in['id'] ?? 0), $me);
     $j['assignees'] = q('SELECT u.id, u.name, u.phone, a.assigned_at FROM job_assignees a JOIN users u ON u.id = a.user_id
         WHERE a.job_id = ? AND a.removed_at IS NULL ORDER BY u.name', [$j['id']])->fetchAll();
-    $updates = q('SELECT ju.id, ju.kind, ju.body, ju.report_id, ju.created_at, ju.user_id, u.name AS user_name
+    $updates = q('SELECT ju.id, ju.kind, ju.body, ju.links, ju.report_id, ju.created_at, ju.user_id, u.name AS user_name
         FROM job_updates ju LEFT JOIN users u ON u.id = ju.user_id WHERE ju.job_id = ? ORDER BY ju.id', [$j['id']])->fetchAll();
     $files = attachments_for('jobnote', array_column($updates, 'id'));
     foreach ($updates as &$u) {
         $u['files'] = $files[(int)$u['id']] ?? [];
+        $u['links'] = json_decode((string)$u['links'], true) ?: [];
     }
     unset($u);
     $j['updates'] = $updates;
@@ -373,24 +402,31 @@ function act_job_assign(array $in, array $me): void
     json_out(['ok' => true]);
 }
 
-/** Comment or follow-up on the timeline, with optional photos. */
+/** Comment or follow-up on the timeline, with optional photos and links to videos or pictures. */
 function act_job_update(array $in, array $me): void
 {
     $job = load_job((int)($in['id'] ?? 0), $me);
     $body = str_in($in['body'] ?? '', 5000);
+    $links = job_links_in($in['links'] ?? []);
     $files = count(uploaded_files('files'));
-    if ($body === '' && !$files) {
-        fail('Write an update or add a photo.');
+    if ($body === '' && !$files && !$links) {
+        fail('Write an update, add a photo or add a link.');
     }
     if ($err = check_uploads('files')) {
         fail($err);
     }
     db()->beginTransaction();
     $noteId = job_log($job['id'], is_management($me) ? 'followup' : 'comment', $body);
+    job_log_links($noteId, $links);
     save_uploads('jobnote', $noteId, $me['id']);
     db()->commit();
     touch_change();
     $title = $me['name'] . " on {$job['ref']}: {$job['title']}";
+    if ($links) {
+        $body = trim($body . "
+" . implode("
+", $links));
+    }
     if (is_management($me)) {
         notify(array_diff(job_assignee_ids($job['id']), [$me['id']]), 'job', $title, $body, 'jobs/' . $job['id'], false);
     } else {
@@ -404,6 +440,7 @@ function act_job_status(array $in, array $me): void
     $job = load_job((int)($in['id'] ?? 0), $me);
     $action = (string)($in['action'] ?? '');
     $note = str_in($in['note'] ?? '', 5000);
+    $links = $action === 'complete' ? job_links_in($in['links'] ?? []) : [];
     $admin = is_management($me);
     $assignee = in_array($me['id'], job_assignee_ids($job['id']), true);
     $s = $job['status'];
@@ -510,6 +547,7 @@ function act_job_status(array $in, array $me): void
     q("UPDATE jobs SET status = ?$extra, self_closed = ?, updated_at = NOW() WHERE id = ?",
         array_merge([$to], $params, [$action === 'self_close' ? 1 : 0, $job['id']]));
     $noteId = job_log($job['id'], $action === 'complete' ? 'complete' : 'status', $text);
+    job_log_links($noteId, $links);
     if (in_array($to, ['awaiting_check', 'done', 'cancelled'], true)) {
         close_extensions($job['id'], false, 'cancelled', 'The job was ' . ($to === 'awaiting_check' ? 'marked complete' : $to) . '.');
     }

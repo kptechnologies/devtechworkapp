@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -776,6 +776,8 @@ function column_sql(): array
         // v18: minutes before the due time to remind people; NULL uses the Settings default, '' turns reminders off
         ['jobs', 'remind_offsets', 'VARCHAR(40) NULL'],
         ['job_tasks', 'remind_offsets', 'VARCHAR(40) NULL'],
+        // v20: links (Drive folders, YouTube videos, photo albums) shared on a timeline entry, as a JSON list
+        ['job_updates', 'links', 'TEXT NULL'],
     ];
 }
 

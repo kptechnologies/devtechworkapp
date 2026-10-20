@@ -12,6 +12,64 @@
   const prioPill = (p) => (p === 'normal' || p === 'low' ? '' : `<span class="pill ${PRIORITY[p]?.[1] || ''}"><i class="ti ti-flag"></i>${esc(PRIORITY[p]?.[0] || p)}</span>`);
   const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag', task: 'checkbox', extension: 'clock-plus' };
 
+  /** What a shared link points at, for its icon and label. */
+  function linkKind(url) {
+    let host;
+    let path;
+    try { const u = new URL(url); host = u.hostname.replace(/^www\./, ''); path = u.pathname.toLowerCase(); } catch { return { icon: 'link', label: url }; }
+    if (/\.(jpe?g|png|gif|webp|heic)$/.test(path)) return { icon: 'photo', label: 'Picture' };
+    if (/\.(mp4|mov|webm|3gp|mkv|avi)$/.test(path)) return { icon: 'movie', label: 'Video' };
+    if (/(^|\.)youtube\.com$|^youtu\.be$/.test(host)) return { icon: 'brand-youtube', label: 'YouTube video' };
+    if (host === 'photos.google.com' || host === 'photos.app.goo.gl') return { icon: 'photo', label: 'Google Photos' };
+    if (host === 'drive.google.com') return { icon: 'brand-google-drive', label: path.includes('/folders/') ? 'Google Drive folder' : 'Google Drive file' };
+    if (/(^|\.)dropbox\.com$/.test(host)) return { icon: 'brand-dropbox', label: 'Dropbox' };
+    if (/(^|\.)(onedrive\.live\.com|1drv\.ms|sharepoint\.com)$/.test(host)) return { icon: 'cloud', label: 'OneDrive' };
+    return { icon: 'link', label: host };
+  }
+
+  /** One link as a chip that opens in a new tab; `rm` adds a remove button at that index. */
+  const linkChip = (url, rm) => {
+    const k = linkKind(url);
+    const inner = `<i class="ti ti-${k.icon}"></i><span class="link-l">${esc(k.label)}</span>`;
+    return rm === undefined
+      ? `<a class="link-chip" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${inner}<i class="ti ti-external-link faint"></i></a>`
+      : `<span class="link-chip" title="${esc(url)}">${inner}<button type="button" class="link-rm" data-rm="${rm}" aria-label="Remove link"><i class="ti ti-x"></i></button></span>`;
+  };
+
+  /** Escaped text with web addresses made clickable. */
+  const linkify = (text) => esc(text).replace(/https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)\S)+/g, (m) => {
+    const tail = (m.match(/[.,;:!?)]+$/) || [''])[0];
+    const url = m.slice(0, m.length - tail.length);
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
+  });
+
+  /** Box to paste links to videos or pictures (Google Drive, YouTube…). links() also takes any still in the box, or gives null if one isn't a link. */
+  function linkField(host) {
+    host.innerHTML = `<div class="link-add"><input type="url" inputmode="url" autocomplete="off" aria-label="Link to videos or pictures"
+        placeholder="Paste a link to videos or pictures (Google Drive, YouTube…)"><button type="button" class="btn sm ghost"><i class="ti ti-link-plus"></i>Add link</button></div>
+      <div class="link-list"></div>`;
+    const input = $('input', host);
+    const list = $('.link-list', host);
+    const links = [];
+    const draw = () => { list.innerHTML = links.map((u, i) => linkChip(u, i)).join(''); };
+    const add = () => {
+      for (let v of input.value.split(/\s+/).filter(Boolean)) {
+        if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+        let ok = false;
+        try { const u = new URL(v); ok = /^https?:$/.test(u.protocol) && u.hostname.includes('.'); } catch { ok = false; }
+        if (!ok) { toast('That isn\'t a link. Paste the full address, e.g. https://drive.google.com/…', true); input.focus(); return false; }
+        if (!links.includes(v)) links.push(v);
+      }
+      input.value = '';
+      draw();
+      return true;
+    };
+    $('button', host).addEventListener('click', () => { add(); input.focus(); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    list.addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b) { links.splice(+b.dataset.rm, 1); draw(); } });
+    return { links: () => (add() ? links.slice() : null) };
+  }
+
   /** Finger/mouse signature pad. Returns { file: () => Promise<File|null>, clear, isEmpty }. */
   function signaturePad(canvas) {
     const ctx = canvas.getContext('2d');
@@ -383,20 +441,25 @@
         <div class="sec-title">Timeline</div>
         <ol class="timeline">${j.updates.map((u) => `<li class="tl-${esc(u.kind)}"><div class="tl-dot"><i class="ti ti-${KIND_ICON[u.kind] || 'point'}"></i></div>
           <div class="tl-body"><div class="small"><b>${esc(u.user_name || 'System')}</b> <span class="faint">· ${esc(ago(u.created_at))}</span></div>
-          ${u.body ? `<div style="white-space:pre-wrap">${esc(u.body)}</div>` : ''}
+          ${u.body ? `<div class="tl-text">${linkify(u.body)}</div>` : ''}
+          ${u.links?.length ? `<div class="link-list">${u.links.map((l) => linkChip(l)).join('')}</div>` : ''}
           ${u.report_id ? `<a class="small" href="#/reports/${u.report_id}">Open report</a>` : ''}
           ${u.files.length ? `<div class="tl-files" style="margin-top:6px">${App.gallery(u.files)}</div>` : ''}</div></li>`).join('')}</ol>
         ${!['cancelled'].includes(j.status) ? `<form id="jd-comment" class="card card-pad" style="margin-top:8px;background:var(--surface-2)">
           <div class="field" style="margin-bottom:8px"><label for="jd-body">${admin ? 'Follow up' : 'Add an update'}</label>
             <textarea id="jd-body" name="body" rows="2" placeholder="${admin ? 'Ask for progress, give instructions…' : 'What happened, what\'s next, anything you need…'}"></textarea></div>
-          <div id="jd-up"></div><button class="btn sm" type="submit" style="margin-top:8px"><i class="ti ti-send"></i>Post</button></form>` : ''}`;
+          <div id="jd-up"></div><div id="jd-links" style="margin-top:8px"></div>
+          <button class="btn sm" type="submit" style="margin-top:8px"><i class="ti ti-send"></i>Post</button></form>` : ''}`;
       $$('.tl-files', el).forEach((g) => App.bindGallery(g));
       const up = $('#jd-up', el) ? App.uploader($('#jd-up', el), { label: 'Photo', capture: true }) : null;
+      const lf = $('#jd-links', el) ? linkField($('#jd-links', el)) : null;
       $('#jd-comment', el)?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = e.target.body.value.trim();
-        if (!body && !up.count()) { toast('Write an update or add a photo.', true); return; }
-        try { await App.busy(e.submitter, () => api('job_update', { data: { id: j.id, body }, files: up.files() })); toast('Update posted'); render(); } catch (err) { App.fail(err); }
+        const links = lf.links();
+        if (!links) return;
+        if (!body && !up.count() && !links.length) { toast('Write an update, add a photo or add a link.', true); return; }
+        try { await App.busy(e.submitter, () => api('job_update', { data: { id: j.id, body, links }, files: up.files() })); toast('Update posted'); render(); } catch (err) { App.fail(err); }
       });
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
       $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
@@ -493,6 +556,8 @@
       <form id="jc-form" novalidate>
         <p class="muted" style="margin-bottom:12px">Take photos of the finished work and get the client to sign. An admin will check before the job is closed.</p>
         <div class="field" data-field="files"><div class="label">Photos of the finished work <span class="req">*</span></div><div id="jc-up"></div></div>
+        <div class="field"><div class="label">Links to videos or more pictures</div><div id="jc-links"></div>
+          <div class="help">For videos or big albums, upload them to Google Drive or YouTube and paste the link here.</div></div>
         <div class="field"><label for="jc-note">What did you do? <span class="req">*</span></label><textarea id="jc-note" name="note" rows="3" placeholder="e.g. Installed and calibrated the interactive board in JSS2 classroom, tested with the teacher."></textarea></div>
         <div class="sec-title">Client sign-off</div>
         <div id="jc-sign">
@@ -506,6 +571,7 @@
         <div class="field hide" id="jc-why"><label for="jc-sk">Why not? <span class="req">*</span></label><input id="jc-sk" name="signoff_skipped" placeholder="e.g. Director travelling; teacher saw the work"></div>
       </form>`, '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="jc-ok"><i class="ti ti-send"></i>Send for checking</button>', { wide: true });
     const up = App.uploader($('#jc-up', el), { label: 'Take photo', accept: 'image/*', capture: true });
+    const lf = linkField($('#jc-links', el));
     const pad = signaturePad($('#jc-pad', el));
     $('#jc-clear', el).addEventListener('click', () => pad.clear());
     $('#jc-na', el).addEventListener('change', (e) => {
@@ -516,6 +582,8 @@
       const form = $('#jc-form', el);
       const d = App.formData(form);
       const note = (d.note || '').trim();
+      const links = lf.links();
+      if (!links) return;
       const errs = {};
       if (!up.count()) errs.files = 'Add at least one photo.';
       if (!note) errs.note = 'Say what was done.';
@@ -529,7 +597,7 @@
       const files = up.files().concat(sig ? [{ field: 'signature', file: sig, name: 'signature.png' }] : []);
       try {
         await App.busy(e.currentTarget, () => api('job_status', { data: { id: j.id, action: 'complete', note, signoff_name: d.signoff_name, signoff_phone: d.signoff_phone,
-          signoff_unavailable: d.signoff_unavailable ? 1 : '', signoff_skipped: d.signoff_skipped }, files }));
+          signoff_unavailable: d.signoff_unavailable ? 1 : '', signoff_skipped: d.signoff_skipped, links }, files }));
         App.closeTop();
         toast('Sent for checking');
         jobsChanged();
