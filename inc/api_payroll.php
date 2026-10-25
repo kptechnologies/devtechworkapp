@@ -95,9 +95,12 @@ function payroll_overtime_pending(?int $uid = null, ?string $month = null): arra
 function payroll_calc(int $uid, string $month, bool $live = false): array
 {
     if (!$live) {
-        $lock = q('SELECT data, locked_at FROM pay_locks WHERE month = ? AND user_id = ?', [$month, $uid])->fetch();
+        $lock = q('SELECT data, locked_at, published_at FROM pay_locks WHERE month = ? AND user_id = ?', [$month, $uid])->fetch();
         if ($lock) {
-            return ['locked' => true, 'locked_at' => $lock['locked_at']] + (json_decode($lock['data'], true) ?: []);
+            $data = json_decode($lock['data'], true) ?: [];
+            // Snapshots taken before advances existed.
+            $data += ['advances' => [], 'advances_total' => 0];
+            return ['locked' => true, 'locked_at' => $lock['locked_at'], 'published_at' => $lock['published_at']] + $data;
         }
     }
     $u = q('SELECT id, name, salary, start_date, bank_name, bank_account FROM users WHERE id = ?', [$uid])->fetch();
@@ -185,10 +188,14 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
     $adj = array_map(fn($a) => ['id' => (int)$a['id'], 'label' => $a['label'], 'amount' => (float)$a['amount'], 'note' => $a['note'], 'created_at' => $a['created_at'], 'by' => $a['by_name']],
         q('SELECT a.*, u.name AS by_name FROM pay_adjustments a LEFT JOIN users u ON u.id = a.created_by WHERE a.user_id = ? AND a.month = ? ORDER BY a.id', [$uid, $month])->fetchAll());
     $adjTotal = round(array_sum(array_column($adj, 'amount')), 2);
+    $adv = array_map(fn($a) => ['id' => (int)$a['id'], 'amount' => (float)$a['amount'], 'given_on' => $a['given_on'], 'note' => $a['note'], 'created_at' => $a['created_at'], 'by' => $a['by_name']],
+        q('SELECT a.*, u.name AS by_name FROM pay_advances a LEFT JOIN users u ON u.id = a.created_by WHERE a.user_id = ? AND a.month = ? ORDER BY a.given_on, a.id', [$uid, $month])->fetchAll());
+    $advTotal = round(array_sum(array_column($adv, 'amount')), 2);
     $salary = (float)$u['salary'];
     $deductions = $totals['late'] + $totals['absence'] + $totals['report'];
     return [
         'locked' => false,
+        'published_at' => null,
         'month' => $month,
         'user' => ['id' => (int)$u['id'], 'name' => $u['name'], 'bank_name' => $u['bank_name'], 'bank_account' => $u['bank_account']],
         'salary' => $salary,
@@ -200,7 +207,9 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
         'deductions' => $deductions,
         'overtime' => $totals['overtime'],
         'adjustments_total' => $adjTotal,
-        'net' => round($salary - $deductions + $totals['overtime'] + $adjTotal, 2),
+        'advances' => $adv,
+        'advances_total' => $advTotal,
+        'net' => round($salary - $deductions + $totals['overtime'] + $adjTotal - $advTotal, 2),
     ];
 }
 
@@ -208,19 +217,45 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
 function payroll_summary(array $c): array
 {
     return ['id' => $c['user']['id'], 'name' => $c['user']['name'], 'salary' => $c['salary'], 'deductions' => $c['deductions'], 'overtime' => $c['overtime'],
-        'adjustments' => $c['adjustments_total'], 'net' => $c['net'], 'counts' => $c['counts'], 'totals' => $c['totals'], 'locked' => $c['locked'],
+        'adjustments' => $c['adjustments_total'], 'advances' => $c['advances_total'], 'net' => $c['net'], 'counts' => $c['counts'], 'totals' => $c['totals'],
+        'locked' => $c['locked'], 'published' => !empty($c['published_at']),
         'bank_name' => $c['user']['bank_name'], 'bank_account' => $c['user']['bank_account']];
 }
 
-/** What a staff member sees of their own month: the attendance record, never money. */
+/** What a staff member sees of their own month: salary, advances and expected balance, plus the attendance record.
+    Charge amounts, adjustments and net pay stay hidden until the admin publishes the month. */
 function payroll_staff_view(array $c): array
 {
-    return [
+    $published = !empty($c['published_at']);
+    $advances = array_map(fn($a) => ['amount' => $a['amount'], 'given_on' => $a['given_on'], 'note' => $a['note']], $c['advances']);
+    $base = [
         'locked' => $c['locked'],
         'locked_at' => $c['locked_at'] ?? null,
+        'published' => $published,
+        'published_at' => $c['published_at'] ?? null,
         'month' => $c['month'],
         'rules_from' => $c['rules_from'],
         'counts' => $c['counts'],
+        'salary' => $c['salary'],
+        'advances' => $advances,
+        'advances_total' => $c['advances_total'],
+        'expected' => round($c['salary'] - $c['advances_total'], 2),
+    ];
+    if ($published) {
+        $adj = array_map(fn($a) => ['label' => $a['label'], 'amount' => $a['amount'], 'note' => $a['note']], $c['adjustments']);
+        return $base + [
+            'days' => array_map(fn($d) => [
+                'date' => $d['date'], 'status' => $d['status'], 'in' => $d['in'], 'out' => $d['out'], 'items' => $d['items'], 'overtime' => $d['overtime'],
+            ], $c['days']),
+            'totals' => $c['totals'],
+            'deductions' => $c['deductions'],
+            'overtime' => $c['overtime'],
+            'adjustments' => $adj,
+            'adjustments_total' => $c['adjustments_total'],
+            'net' => $c['net'],
+        ];
+    }
+    return $base + [
         'days' => array_map(fn($d) => [
             'date' => $d['date'], 'status' => $d['status'], 'in' => $d['in'], 'out' => $d['out'],
             'items' => array_map(fn($i) => ['code' => $i['code'], 'label' => $i['label'], 'waived' => $i['waived'], 'note' => $i['note'] ?? null], $d['items']),
@@ -390,15 +425,103 @@ function act_payroll_lock(array $in, array $me): void
     $ids = !empty($in['user_id']) ? [(int)$in['user_id']] : array_map(fn($s) => (int)$s['id'], payroll_staff($month));
     foreach ($ids as $uid) {
         if ($lock) {
-            $data = payroll_calc($uid, $month, true);
-            unset($data['locked']);
-            q('INSERT INTO pay_locks (month, user_id, data, locked_by, locked_at) VALUES (?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), locked_by = VALUES(locked_by), locked_at = NOW()',
-                [$month, $uid, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id']]);
+            payroll_lock_one($uid, $month, $me);
         } else {
+            // Unlocking also unpublishes: the figures may change.
             q('DELETE FROM pay_locks WHERE month = ? AND user_id = ?', [$month, $uid]);
         }
     }
     audit($lock ? 'payroll_lock' : 'payroll_unlock', 'payroll', null, ['month' => $month, 'staff' => count($ids)]);
+    touch_change();
+    json_out(['ok' => true]);
+}
+
+/** Save a snapshot of one staff member's month; relocking refreshes it and keeps it published if it was. */
+function payroll_lock_one(int $uid, string $month, array $me): void
+{
+    $data = payroll_calc($uid, $month, true);
+    unset($data['locked'], $data['published_at']);
+    q('INSERT INTO pay_locks (month, user_id, data, locked_by, locked_at) VALUES (?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE data = VALUES(data), locked_by = VALUES(locked_by), locked_at = NOW()',
+        [$month, $uid, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id']]);
+}
+
+/** Show (or hide) the final month to staff: their deductions, adjustments, advances and net pay. Publishing locks first. */
+function act_payroll_publish(array $in, array $me): void
+{
+    require_admin();
+    $month = month_in($in);
+    $publish = !empty($in['publish']);
+    $ids = !empty($in['user_id']) ? [(int)$in['user_id']] : array_map(fn($s) => (int)$s['id'], payroll_staff($month));
+    $label = date('F Y', strtotime($month . '-01'));
+    $told = [];
+    foreach ($ids as $uid) {
+        $was = q('SELECT published_at FROM pay_locks WHERE month = ? AND user_id = ?', [$month, $uid])->fetch();
+        if ($publish) {
+            if (!$was) {
+                payroll_lock_one($uid, $month, $me);
+            }
+            if (!$was || !$was['published_at']) {
+                q('UPDATE pay_locks SET published_at = NOW() WHERE month = ? AND user_id = ?', [$month, $uid]);
+                $told[] = $uid;
+            }
+        } elseif ($was) {
+            q('UPDATE pay_locks SET published_at = NULL WHERE month = ? AND user_id = ?', [$month, $uid]);
+        }
+    }
+    if ($told) {
+        notify($told, 'payroll', 'Your ' . $label . ' pay is ready', 'See your full breakdown and final pay.', 'my-pay');
+    }
+    audit($publish ? 'payroll_publish' : 'payroll_unpublish', 'payroll', null, ['month' => $month, 'staff' => count($ids)]);
+    touch_change();
+    json_out(['ok' => true]);
+}
+
+/** Record a salary advance; it comes off the pay of the month it's recorded in. Staff can see their advances. */
+function act_payroll_advance(array $in, array $me): void
+{
+    require_admin();
+    $uid = (int)($in['user_id'] ?? 0);
+    $month = month_in($in);
+    $amount = money_in($in['amount'] ?? 0);
+    $given = (string)($in['given_on'] ?? '');
+    $errors = [];
+    if ($amount <= 0) {
+        $errors['amount'] = 'Enter the amount given.';
+    }
+    if (!valid_date($given)) {
+        $errors['given_on'] = 'Choose the date it was given.';
+    }
+    if ($errors) {
+        json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
+    }
+    if (!q('SELECT 1 FROM users WHERE id = ?', [$uid])->fetchColumn()) {
+        fail('Staff member not found.', 404);
+    }
+    $label = date('F Y', strtotime($month . '-01'));
+    if (month_locked($month, $uid)) {
+        fail('Payroll for ' . $label . ' is locked. Unlock it first.');
+    }
+    q('INSERT INTO pay_advances (user_id, month, amount, given_on, note, created_by, created_at) VALUES (?,?,?,?,?,?,NOW())',
+        [$uid, $month, $amount, $given, str_in($in['note'] ?? '', 500), $me['id']]);
+    $id = (int)db()->lastInsertId();
+    audit('pay_advance', 'user', $uid, ['month' => $month, 'amount' => $amount]);
+    notify([$uid], 'payroll', 'Salary advance: ' . cfg('currency', '₦') . number_format($amount), 'It will come off your ' . $label . ' pay.', 'my-pay');
+    touch_change();
+    json_out(['ok' => true, 'id' => $id]);
+}
+
+function act_payroll_advance_delete(array $in, array $me): void
+{
+    require_admin();
+    $a = q('SELECT * FROM pay_advances WHERE id = ?', [(int)($in['id'] ?? 0)])->fetch();
+    if (!$a) {
+        fail('Advance not found.', 404);
+    }
+    if (month_locked($a['month'], (int)$a['user_id'])) {
+        fail('This month is locked. Unlock it first.');
+    }
+    q('DELETE FROM pay_advances WHERE id = ?', [$a['id']]);
+    audit('pay_advance_delete', 'user', (int)$a['user_id'], ['month' => $a['month'], 'amount' => (float)$a['amount']]);
     touch_change();
     json_out(['ok' => true]);
 }
@@ -412,12 +535,12 @@ function act_payroll_export(array $in, array $me): void
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
     fputcsv($out, ['Staff', 'Bank', 'Account number', 'Salary', 'Late days', 'Lateness charges', 'Absences', 'Absence charges', 'Missed reports', 'Report charges',
-        'Overtime days', 'Overtime pay', 'Adjustments', 'Net pay', 'Locked']);
+        'Overtime days', 'Overtime pay', 'Adjustments', 'Salary advances', 'Net pay', 'Locked', 'Published']);
     foreach (payroll_staff($month) as $s) {
         $x = payroll_summary(payroll_calc((int)$s['id'], $month));
         fputcsv($out, array_map(fn($v) => csv_safe((string)$v), [$x['name'], $x['bank_name'], $x['bank_account'], $x['salary'], $x['counts']['late'], $x['totals']['late'],
             $x['counts']['absence'], $x['totals']['absence'], $x['counts']['report'], $x['totals']['report'], $x['counts']['overtime'], $x['overtime'],
-            $x['adjustments'], $x['net'], $x['locked'] ? 'Yes' : 'No']));
+            $x['adjustments'], $x['advances'], $x['net'], $x['locked'] ? 'Yes' : 'No', $x['published'] ? 'Yes' : 'No']));
     }
     exit;
 }

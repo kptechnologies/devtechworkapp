@@ -542,7 +542,7 @@
         { href: '', icon: 'home', text: 'Home', mobile: true },
         { href: 'wallet', icon: 'wallet', text: 'Wallet' },
         { href: 'report/new', icon: 'clipboard-plus', text: 'New report', mobile: true },
-        { href: 'my-pay', icon: 'calendar-stats', text: 'My record' },
+        { href: 'my-pay', icon: 'receipt', text: 'My pay' },
         ...(canReviewMoney() ? [] : [{ href: 'requests', icon: 'cash', text: 'Funding requests' }]),
         { href: 'profile', icon: 'user', text: 'Profile', mobile: true },
       ];
@@ -557,7 +557,7 @@
       { href: 'timetable', icon: 'calendar-time', text: 'Timetable' },
       { href: 'reports', icon: 'clipboard-text', text: 'My reports' },
       { href: 'attendance', icon: 'clock-check', text: 'My attendance' },
-      { href: 'my-pay', icon: 'calendar-stats', text: 'My record' },
+      { href: 'my-pay', icon: 'receipt', text: 'My pay' },
       { href: 'queries', icon: 'alert-triangle', text: 'My queries', badge: 'queries' },
       { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },
       { href: 'memos', icon: 'mail', text: 'Notes & memos', badge: 'memos' },
