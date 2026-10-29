@@ -1,7 +1,8 @@
 <?php
 /*
  * AI assistant for management: daily brief, staff reviews, report summaries and job next steps.
- * Runs on Claude (Anthropic PHP SDK, composer install) or ChatGPT (OpenAI, plain curl), chosen in Settings → AI.
+ * Runs on Claude (Anthropic) or ChatGPT (OpenAI), chosen in Settings → AI. Both are called over plain curl, so
+ * nothing needs installing on the server.
  * It only suggests. Suggestions are stored in ai_suggestions and a manager creates the real task, follow-up,
  * reminder or job with one click.
  */
@@ -10,15 +11,6 @@ const AI_MODEL = 'claude-opus-5-5';
 const AI_OPENAI_MODEL = 'gpt-5';
 const AI_PROVIDERS = ['claude' => 'Claude', 'openai' => 'ChatGPT'];
 const AI_SUGGESTION_TYPES = ['job_task', 'followup', 'reminder', 'job'];
-
-if (is_file(APP_ROOT . '/vendor/autoload.php')) {
-    require_once APP_ROOT . '/vendor/autoload.php';
-}
-
-function ai_sdk_loaded(): bool
-{
-    return class_exists('Anthropic\\Client');
-}
 
 function ai_settings(): array
 {
@@ -50,8 +42,8 @@ function ai_provider_problem(string $provider): string
         }
         return $s['has_openai_key'] ? '' : 'Add the OpenAI API key in Settings → AI assistant.';
     }
-    if (!ai_sdk_loaded()) {
-        return 'The Claude library is not installed on the server (run composer install).';
+    if (!function_exists('curl_init')) {
+        return 'The PHP curl extension is needed for the AI assistant. Turn it on in cPanel → Select PHP Version.';
     }
     return $s['has_key'] ? '' : 'Add the Claude API key in Settings → AI assistant.';
 }
@@ -86,11 +78,6 @@ function ai_problem(?string $provider = null): string
         return 'Turn on the AI assistant in Settings.';
     }
     return ai_provider_problem(ai_pick_provider($provider));
-}
-
-function ai_client(string $key = '')
-{
-    return new Anthropic\Client(apiKey: $key !== '' ? $key : ai_api_key('claude'));
 }
 
 /* ------------------------------------------------------------------ the call */
@@ -185,32 +172,59 @@ function ai_run(string $kind, array $scope, string $task, string $context, ?int 
     return ai_run_get($runId);
 }
 
-/** Claude through the Anthropic SDK. Returns ['text', 'in', 'out', 'model']. */
-function ai_call_claude(string $system, string $prompt, array $schema): array
+/** POST JSON to the Claude API. Returns [status, decoded body]. */
+function ai_claude_http(array $body, string $key, int $timeout = 300): array
 {
-    try {
-        $msg = ai_client()->beta->messages->create(
-            model: AI_MODEL,
-            maxTokens: 16000,
-            system: [['type' => 'text', 'text' => $system, 'cacheControl' => ['type' => 'ephemeral']]],
-            messages: [['role' => 'user', 'content' => $prompt]],
-            outputConfig: ['effort' => 'medium', 'format' => ['type' => 'json_schema', 'schema' => $schema]],
-            fallbacks: 'default',
-            betas: ['server-side-fallback-2026-07-01'],
-        );
-    } catch (Anthropic\Core\Exceptions\APIStatusException $e) {
-        error_log('[portal] ai: ' . $e->getMessage());
-        $type = $e->type instanceof BackedEnum ? $e->type->value : (string)($e->type ?? '');
-        throw new RuntimeException(match (true) {
-            $type === 'authentication_error' => 'The Claude API key was rejected. Check it in Settings → AI assistant.',
-            in_array($type, ['rate_limit_error', 'overloaded_error'], true) => 'The AI service is busy. Try again in a minute.',
-            default => 'The AI service returned an error. Try again later.',
-        });
-    } catch (Throwable $e) {
-        error_log('[portal] ai: ' . $e->getMessage());
+    $ch = curl_init('https://api.anthropic.com/v1/messages');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-api-key: ' . $key, 'anthropic-version: 2023-06-01',
+            'anthropic-beta: server-side-fallback-2026-07-01'],
+        CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_UNICODE),
+    ]);
+    $raw = curl_exec($ch);
+    $err = curl_error($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($raw === false) {
+        error_log('[portal] ai claude: ' . $err);
         throw new RuntimeException('Could not reach the AI service. Check the server\'s internet connection and try again.');
     }
-    $stop = $msg->stopReason instanceof BackedEnum ? $msg->stopReason->value : (string)$msg->stopReason;
+    return [$code, json_decode((string)$raw, true) ?: []];
+}
+
+/** A Claude API error reply as a message for the user. */
+function ai_claude_error(int $code, array $body): RuntimeException
+{
+    $type = (string)($body['error']['type'] ?? '');
+    error_log('[portal] ai claude ' . $code . ': ' . ($body['error']['message'] ?? ''));
+    return new RuntimeException(match (true) {
+        $code === 401 || $type === 'authentication_error' => 'The Claude API key was rejected. Check it in Settings → AI assistant.',
+        $code === 403 || $type === 'permission_error' => 'This Claude API key isn\'t allowed to use ' . AI_MODEL . '. Check the key\'s workspace at console.anthropic.com.',
+        $code === 429 || $code === 529 || $code >= 500 => 'The AI service is busy. Try again in a minute.',
+        default => 'The AI service returned an error: ' . ai_clip($body['error']['message'] ?? 'unknown', 200),
+    });
+}
+
+/** Claude through the Messages API with a JSON schema output. Returns ['text', 'in', 'out', 'model']. */
+function ai_call_claude(string $system, string $prompt, array $schema): array
+{
+    [$code, $body] = ai_claude_http([
+        'model' => AI_MODEL,
+        'max_tokens' => 16000,
+        'system' => [['type' => 'text', 'text' => $system, 'cache_control' => ['type' => 'ephemeral']]],
+        'messages' => [['role' => 'user', 'content' => $prompt]],
+        'output_config' => ['effort' => 'medium', 'format' => ['type' => 'json_schema', 'schema' => $schema]],
+        // If Claude's safety checks decline, the API retries on Anthropic's recommended fallback model.
+        'fallbacks' => 'default',
+    ], ai_api_key('claude'));
+    if ($code !== 200) {
+        throw ai_claude_error($code, $body);
+    }
+    $stop = (string)($body['stop_reason'] ?? '');
     if ($stop === 'refusal') {
         throw new RuntimeException('The AI declined this request. Try a smaller date range or different staff member.');
     }
@@ -218,16 +232,17 @@ function ai_call_claude(string $system, string $prompt, array $schema): array
         throw new RuntimeException('The AI answer was too long and got cut off. Try a shorter date range.');
     }
     $text = '';
-    foreach ($msg->content as $block) {
-        if ($block->type === 'text') {
-            $text .= $block->text;
+    foreach ((array)($body['content'] ?? []) as $block) {
+        if (($block['type'] ?? '') === 'text') {
+            $text .= $block['text'];
         }
     }
+    $u = $body['usage'] ?? [];
     return [
         'text' => $text,
-        'in' => (int)($msg->usage->inputTokens ?? 0) + (int)($msg->usage->cacheReadInputTokens ?? 0) + (int)($msg->usage->cacheCreationInputTokens ?? 0),
-        'out' => (int)($msg->usage->outputTokens ?? 0),
-        'model' => $msg->model instanceof BackedEnum ? $msg->model->value : (string)($msg->model ?? AI_MODEL),
+        'in' => (int)($u['input_tokens'] ?? 0) + (int)($u['cache_read_input_tokens'] ?? 0) + (int)($u['cache_creation_input_tokens'] ?? 0),
+        'out' => (int)($u['output_tokens'] ?? 0),
+        'model' => (string)($body['model'] ?? AI_MODEL),
     ];
 }
 

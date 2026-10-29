@@ -387,13 +387,12 @@
           <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="daily_brief" ${s.ai.daily_brief ? 'checked' : ''}><span>Send management an AI morning brief at the reminder time</span></label>
           <div class="field"><label for="se-aiprov">Use</label><select id="se-aiprov" name="provider" style="max-width:280px">${App.opts([['claude', 'Claude (Anthropic)'], ['openai', 'ChatGPT (OpenAI)']], s.ai.provider)}</select>
             <div class="help">Used for the morning brief and as the default on the AI page.</div></div>
+          ${s.ai.curl ? '' : '<p class="small" style="margin-bottom:12px;color:var(--bad, #A32D2D)">The AI assistant needs the PHP curl extension. Turn it on in cPanel → Select PHP Version.</p>'}
           <div data-ai-prov="claude">
-            ${s.ai.sdk ? '' : '<p class="small" style="margin-bottom:12px;color:var(--bad, #A32D2D)">The Claude library is not installed on this server yet. Run <b>composer install</b> in the portal folder (the deploy does this automatically).</p>'}
             <div class="field"><label for="se-aikey">Claude API key</label><input type="password" id="se-aikey" name="key" value="${esc(s.ai.key)}" autocomplete="new-password" placeholder="sk-ant-…">
               <div class="help">From <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Model: ${esc(s.ai.model)}. Stored encrypted; leave as is to keep the saved key.</div></div>
             <button class="btn" type="button" data-ai-test="claude" style="margin-bottom:14px"><i class="ti ti-plug-connected"></i>Test Claude</button></div>
           <div data-ai-prov="openai">
-            ${s.ai.curl ? '' : '<p class="small" style="margin-bottom:12px;color:var(--bad, #A32D2D)">ChatGPT needs the PHP curl extension. Turn it on in cPanel → Select PHP Version.</p>'}
             <div class="form-row"><div class="field"><label for="se-oaikey">OpenAI API key</label><input type="password" id="se-oaikey" name="openai_key" value="${esc(s.ai.openai_key)}" autocomplete="new-password" placeholder="sk-…">
               <div class="help">From <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>. Stored encrypted.</div></div>
               <div class="field"><label for="se-oaimodel">ChatGPT model</label><input id="se-oaimodel" name="openai_model" value="${esc(s.ai.openai_model)}" placeholder="gpt-5">

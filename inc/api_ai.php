@@ -156,23 +156,20 @@ function act_ai_test(array $in, array $me): void
         }
         json_out(['ok' => true, 'message' => 'Connected to ChatGPT (' . ($body['model'] ?? $model) . ').']);
     }
-    if (!ai_sdk_loaded()) {
-        fail('The Claude library is not installed on the server (run composer install).');
+    if (!function_exists('curl_init')) {
+        fail('The PHP curl extension is needed for the AI assistant.');
     }
     if ($key === '') {
         fail('Enter the Claude API key first.');
     }
     try {
-        ai_client($key)->messages->create(
-            model: AI_MODEL,
-            maxTokens: 1024,
-            outputConfig: ['effort' => 'low'],
-            messages: [['role' => 'user', 'content' => 'Reply with the single word OK.']],
-        );
-    } catch (Anthropic\Core\Exceptions\APIStatusException $e) {
-        fail('Claude said: ' . $e->getMessage());
-    } catch (Throwable $e) {
-        fail('Could not reach Claude: ' . $e->getMessage());
+        [$code, $body] = ai_claude_http(['model' => AI_MODEL, 'max_tokens' => 1024, 'output_config' => ['effort' => 'low'],
+            'messages' => [['role' => 'user', 'content' => 'Reply with the single word OK.']]], $key, 60);
+    } catch (RuntimeException $e) {
+        fail($e->getMessage());
     }
-    json_out(['ok' => true, 'message' => 'Connected to Claude (' . AI_MODEL . ').']);
+    if ($code !== 200) {
+        fail('Claude said: ' . ($body['error']['message'] ?? "HTTP $code"));
+    }
+    json_out(['ok' => true, 'message' => 'Connected to Claude (' . ($body['model'] ?? AI_MODEL) . ').']);
 }
