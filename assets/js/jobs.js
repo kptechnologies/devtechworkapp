@@ -417,7 +417,7 @@
       const active = ['open', 'in_progress', 'returned'].includes(j.status);
       $('.drawer-head h2', el).textContent = `${j.ref} · ${j.title}`;
       $('.drawer-body', el).innerHTML = `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${jobPill(j.status)}${prioPill(j.priority)}${j.overdue ? '<span class="pill bad"><i class="ti ti-alert-triangle"></i>Overdue</span>' : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${jobPill(j.status)}${prioPill(j.priority)}${j.overdue ? '<span class="pill bad"><i class="ti ti-alert-triangle"></i>Overdue</span>' : ''}${admin && App.aiJobNextSteps ? '<button class="btn sm ghost" id="jd-ai" style="margin-left:auto"><i class="ti ti-sparkles"></i>AI: next steps</button>' : ''}
           ${active && j.due_date ? App.timeLeftPill(j.due_date, j.due_time) : ''}${j.self_closed ? '<span class="pill out"><i class="ti ti-user-check"></i>Closed without admin check</span>' : ''}</div>
         ${j.status === 'awaiting_check' && j.self_close_at ? `<div class="note-box ${admin ? 'warn' : ''}" style="margin-bottom:12px"><i class="ti ti-hourglass"></i>
           ${admin ? `Check the photos by ${esc(clock(j.self_close_at))}. After that, the staff on this job can close it themselves.`
@@ -462,6 +462,7 @@
         try { await App.busy(e.submitter, () => api('job_update', { data: { id: j.id, body, links }, files: up.files() })); toast('Update posted'); render(); } catch (err) { App.fail(err); }
       });
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
+      $('#jd-ai', el)?.addEventListener('click', (e) => App.aiJobNextSteps(e.currentTarget, j.id, render));
       $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
       $$('[data-ext-decide]', el).forEach((b) => b.addEventListener('click', () => decideExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extDecide, render)));
       $$('[data-ext-recommend]', el).forEach((b) => b.addEventListener('click', () => recommendExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extRecommend, render)));

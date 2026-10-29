@@ -19,7 +19,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check PHP syntax
-        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
+        run: find . -name '*.php' -not -path './.git/*' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Set up PHP and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer:v2
+
+      - name: Install PHP packages (Claude SDK for the AI assistant)
+        run: composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
       - name: Upload over FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
@@ -39,4 +48,6 @@ jobs:
             config.sample.php
             install.php
             README.md
+            composer.json
+            composer.lock
             uploads/**

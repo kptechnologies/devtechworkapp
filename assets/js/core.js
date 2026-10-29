@@ -499,6 +499,7 @@
         { href: 'contractors', icon: 'user-cog', text: 'Contract staff' },
         { href: 'queries', icon: 'alert-triangle', text: 'Queries', badge: 'queries' },
         { label: 'Work' },
+        { href: 'ai', icon: 'sparkles', text: 'AI assistant' },
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },
         { href: 'memos', icon: 'mail', text: 'Memos & requests', badge: 'memos' },
@@ -525,6 +526,7 @@
       ] : [];
       return [
         { label: 'Manage' },
+        { href: 'ai', icon: 'sparkles', text: 'AI assistant' },
         { href: 'jobs', icon: 'clipboard-list', text: 'Job orders', badge: 'jobs', mobile: true },
         { href: 'memos', icon: 'mail', text: 'Memos', badge: 'memos', mobile: true },
         { href: 'notices', icon: 'speakerphone', text: 'Notices', badge: 'notices' },

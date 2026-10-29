@@ -44,6 +44,7 @@ $name = htmlspecialchars((string)cfg('app_name'), ENT_QUOTES);
 <script src="<?= $v('assets/js/memos.js') ?>"></script>
 <script src="<?= $v('assets/js/notices.js') ?>"></script>
 <script src="<?= $v('assets/js/ideas.js') ?>"></script>
+<script src="<?= $v('assets/js/ai.js') ?>"></script>
 <script src="<?= $v('assets/js/admin.js') ?>"></script>
 </body>
 </html>

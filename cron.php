@@ -19,6 +19,7 @@ require __DIR__ . '/inc/api_timetable.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/due_reminders.php';
 require __DIR__ . '/inc/api_clock_problems.php';
+require __DIR__ . '/inc/ai.php';
 
 $cli = PHP_SAPI === 'cli';
 if (!$cli) {

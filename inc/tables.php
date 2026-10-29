@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 24;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -728,6 +728,32 @@ function table_sql(): array
             KEY idx_user_time (user_id, created_at),
             KEY idx_created (created_at)
         ) $t",
+        // v23: AI assistant answers (brief, staff review, report summary, job next steps) and the actions it suggested
+        "CREATE TABLE IF NOT EXISTS ai_runs (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            kind VARCHAR(20) NOT NULL,
+            scope TEXT NULL,
+            output MEDIUMTEXT NULL,
+            input_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+            output_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+            created_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_kind (kind, created_at)
+        ) $t",
+        "CREATE TABLE IF NOT EXISTS ai_suggestions (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            run_id INT UNSIGNED NOT NULL,
+            type VARCHAR(12) NOT NULL,
+            job_id INT UNSIGNED NULL,
+            user_id INT UNSIGNED NULL,
+            payload TEXT NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'pending',
+            acted_by INT UNSIGNED NULL,
+            acted_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            KEY idx_status (status, created_at),
+            KEY idx_run (run_id)
+        ) $t",
     ];
 }
 
@@ -807,6 +833,9 @@ function column_sql(): array
         ['job_updates', 'links', 'TEXT NULL'],
         // v22: a locked month the admin has published, so staff see their full breakdown and net pay
         ['pay_locks', 'published_at', 'DATETIME NULL'],
+        // v24: which AI answered (claude or openai) and the exact model
+        ['ai_runs', 'provider', "VARCHAR(10) NOT NULL DEFAULT 'claude'"],
+        ['ai_runs', 'model', "VARCHAR(60) NOT NULL DEFAULT ''"],
     ];
 }
 
