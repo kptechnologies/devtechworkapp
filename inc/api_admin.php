@@ -239,7 +239,7 @@ function act_settings_get(array $in, array $me): void
         ],
         'push_devices' => (int)q('SELECT COUNT(DISTINCT user_id) FROM push_subscriptions')->fetchColumn(),
         'ai' => ai_settings() + ['key' => ai_settings()['has_key'] ? '••••••••' : '', 'openai_key' => ai_settings()['has_openai_key'] ? '••••••••' : '',
-            'sdk' => ai_sdk_loaded(), 'curl' => function_exists('curl_init'), 'model' => AI_MODEL],
+            'curl' => function_exists('curl_init'), 'model' => AI_MODEL],
     ]]);
 }
 

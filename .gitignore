@@ -1,9 +1,6 @@
 # Local settings and secrets (created by install.php)
 config.php
 
-# Composer packages (installed by the deploy workflow; run composer install locally)
-vendor/
-
 # Uploaded receipts and photos
 uploads/*
 !uploads/.htaccess
