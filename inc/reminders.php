@@ -35,6 +35,7 @@ function reminders_due(): bool
         return false;
     }
     return (setting('_rem_digest') !== $t && time() >= strtotime("$t {$rs['time']}"))
+        || (function_exists('ai_enabled') && setting('_rem_ai_brief') !== $t && time() >= strtotime("$t {$rs['time']}") && ai_enabled())
         || (setting('_rem_clockout') !== $t && time() >= strtotime($t . ' ' . work_end()) + 3600);
 }
 
@@ -80,6 +81,14 @@ function run_reminders(bool $force = false): array
     }
 
     // Lesson plans not yet posted for timetabled classes today and tomorrow (in-app, with the digest).
+    // AI morning brief for management (only when the AI assistant is set up).
+    if (function_exists('ai_daily_brief') && setting('_rem_ai_brief') !== $t && time() >= strtotime("$t {$rs['time']}") && ai_enabled()) {
+        save_setting('_rem_ai_brief', $t);
+        if ($msg = ai_daily_brief()) {
+            $log[] = $msg;
+        }
+    }
+
     if ($rs['enabled'] && setting('_rem_timetable') !== $t && time() >= strtotime("$t {$rs['time']}")) {
         save_setting('_rem_timetable', $t);
         $log[] = 'Lesson plan reminders: ' . timetable_plan_reminders() . '.';

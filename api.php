@@ -22,6 +22,7 @@ require __DIR__ . '/inc/api_clock_problems.php';
 require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/due_reminders.php';
 require __DIR__ . '/inc/import.php';
+require __DIR__ . '/inc/api_ai.php';
 
 start_session();
 ensure_schema();
@@ -59,7 +60,7 @@ $getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'rep
     'lessons_list', 'lesson_plans_open', 'lesson_plan_get', 'lessons_compliance', 'lessons_schools', 'lesson_assignments_list', 'schemes_list', 'scheme_weeks',
     'trainings_list', 'training_get', 'timetable_get', 'timetable_class', 'school_docs_list', 'memos_list', 'memo_get', 'memo_people',
     'notices_active', 'notices_list', 'notice_get', 'push_key', 'alerts_status', 'ideas_list', 'idea_get', 'reminders_mine',
-    'clock_problems'];
+    'clock_problems', 'ai_status', 'ai_runs', 'ai_suggestions'];
 
 $fn = 'act_' . $action;
 if ($action === '' || !function_exists($fn)) {

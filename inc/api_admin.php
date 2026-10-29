@@ -238,6 +238,8 @@ function act_settings_get(array $in, array $me): void
             'linked' => (int)q('SELECT COUNT(*) FROM google_links')->fetchColumn(),
         ],
         'push_devices' => (int)q('SELECT COUNT(DISTINCT user_id) FROM push_subscriptions')->fetchColumn(),
+        'ai' => ai_settings() + ['key' => ai_settings()['has_key'] ? '••••••••' : '', 'openai_key' => ai_settings()['has_openai_key'] ? '••••••••' : '',
+            'sdk' => ai_sdk_loaded(), 'curl' => function_exists('curl_init'), 'model' => AI_MODEL],
     ]]);
 }
 
@@ -374,6 +376,20 @@ function act_settings_save(array $in, array $me): void
         save_setting('google', [
             'client_id' => str_in($in['google']['client_id'] ?? '', 300),
             'client_secret' => $secret === '••••••••' ? ($old['client_secret'] ?? '') : trim($secret),
+        ]);
+    }
+    if (isset($in['ai']) && is_array($in['ai'])) {
+        $old = setting('ai') ?: [];
+        $a = $in['ai'];
+        // A masked key posted back keeps the saved one; an empty box removes it.
+        $keep = fn(string $field) => ($k = trim((string)($a[$field] ?? ''))) === '••••••••' ? ($old[$field] ?? '') : ($k === '' ? '' : seal($k));
+        save_setting('ai', [
+            'enabled' => !empty($a['enabled']),
+            'daily_brief' => !empty($a['daily_brief']),
+            'provider' => isset(AI_PROVIDERS[$a['provider'] ?? '']) ? $a['provider'] : 'claude',
+            'key' => $keep('key'),
+            'openai_key' => $keep('openai_key'),
+            'openai_model' => preg_replace('/[^A-Za-z0-9._:-]/', '', str_in($a['openai_model'] ?? '', 60)),
         ]);
     }
     audit('settings_save', 'settings', null, array_keys($in));

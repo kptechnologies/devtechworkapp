@@ -42,7 +42,7 @@
         <div class="page-head"><div><h1>Overview</h1><p class="muted">${esc(fmtDate(d.from))} – ${esc(fmtDate(d.to))}</p></div>
           <div class="actions"><div class="seg" id="db-range">${RANGES.map(([k, l]) => `<button data-r="${k}" class="${k === range ? 'on' : ''}">${l}</button>`).join('')}</div>
           <a class="btn primary" href="#/pay"><i class="ti ti-send"></i>Send payment</a></div></div>
-        <div id="db-notices" style="margin-bottom:14px"></div><div id="db-push" style="margin-bottom:14px"></div>
+        <div id="db-notices" style="margin-bottom:14px"></div><div id="db-push" style="margin-bottom:14px"></div><div id="db-ai" style="margin-bottom:14px"></div>
         <div class="grid g4" style="margin-bottom:14px">
           ${kpi('Total sent', money(m.sent), 'Allowances, budgets, top-ups', 'arrow-up-right', 'tone-in')}
           ${kpi('Total spent', money(m.spent), `${m.n_expenses} expenses · ${m.sent ? Math.round((m.spent / m.sent) * 100) : 0}% of sent`, 'receipt', 'tone-out')}
@@ -112,6 +112,7 @@
 
       App.renderNotices?.($('#db-notices', ctx.el));
       App.renderPushPrompt?.($('#db-push', ctx.el));
+      App.renderAiCard?.($('#db-ai', ctx.el));
       $$('#db-range button', ctx.el).forEach((b) => b.addEventListener('click', () => { range = b.dataset.r; App.store.set('dt-range', range); ctx.refresh(); }));
       $$('[data-txn]', ctx.el).forEach((r) => r.addEventListener('click', () => App.openTxn(+r.dataset.txn)));
       $$('[data-q]', ctx.el).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); App.review([+b.closest('[data-txn]').dataset.txn], b.dataset.q); }));
@@ -379,6 +380,26 @@
             <div class="field"><label>From email</label><input type="email" name="from_email" value="${esc(sm.from_email || '')}" placeholder="portal@devtech.ng"></div></div>
           <div class="field"><label>From name</label><input name="from_name" value="${esc(sm.from_name || '')}"></div>
           <div class="actions"><button class="btn primary" type="submit">Save email settings</button><button class="btn" type="button" id="se-test"><i class="ti ti-mail-forward"></i>Send test email</button></div></form>
+        <form class="card card-pad" id="se-ai"><h3 style="margin-bottom:4px">AI assistant</h3>
+          <p class="muted small" style="margin-bottom:14px">The AI reads jobs, staff reports and attendance and suggests follow-ups for management. It only suggests; nothing is created until someone clicks Create.
+            Usage is billed to the AI account whose key you enter. Save a key for both to switch between them on the AI page.</p>
+          <label class="check-row" style="margin-bottom:10px"><input type="checkbox" name="enabled" ${s.ai.enabled ? 'checked' : ''}><span>Turn on the AI assistant</span></label>
+          <label class="check-row" style="margin-bottom:14px"><input type="checkbox" name="daily_brief" ${s.ai.daily_brief ? 'checked' : ''}><span>Send management an AI morning brief at the reminder time</span></label>
+          <div class="field"><label for="se-aiprov">Use</label><select id="se-aiprov" name="provider" style="max-width:280px">${App.opts([['claude', 'Claude (Anthropic)'], ['openai', 'ChatGPT (OpenAI)']], s.ai.provider)}</select>
+            <div class="help">Used for the morning brief and as the default on the AI page.</div></div>
+          <div data-ai-prov="claude">
+            ${s.ai.sdk ? '' : '<p class="small" style="margin-bottom:12px;color:var(--bad, #A32D2D)">The Claude library is not installed on this server yet. Run <b>composer install</b> in the portal folder (the deploy does this automatically).</p>'}
+            <div class="field"><label for="se-aikey">Claude API key</label><input type="password" id="se-aikey" name="key" value="${esc(s.ai.key)}" autocomplete="new-password" placeholder="sk-ant-…">
+              <div class="help">From <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Model: ${esc(s.ai.model)}. Stored encrypted; leave as is to keep the saved key.</div></div>
+            <button class="btn" type="button" data-ai-test="claude" style="margin-bottom:14px"><i class="ti ti-plug-connected"></i>Test Claude</button></div>
+          <div data-ai-prov="openai">
+            ${s.ai.curl ? '' : '<p class="small" style="margin-bottom:12px;color:var(--bad, #A32D2D)">ChatGPT needs the PHP curl extension. Turn it on in cPanel → Select PHP Version.</p>'}
+            <div class="form-row"><div class="field"><label for="se-oaikey">OpenAI API key</label><input type="password" id="se-oaikey" name="openai_key" value="${esc(s.ai.openai_key)}" autocomplete="new-password" placeholder="sk-…">
+              <div class="help">From <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>. Stored encrypted.</div></div>
+              <div class="field"><label for="se-oaimodel">ChatGPT model</label><input id="se-oaimodel" name="openai_model" value="${esc(s.ai.openai_model)}" placeholder="gpt-5">
+              <div class="help">Type a newer model name here when OpenAI releases one.</div></div></div>
+            <button class="btn" type="button" data-ai-test="openai" style="margin-bottom:14px"><i class="ti ti-plug-connected"></i>Test ChatGPT</button></div>
+          <div class="actions"><button class="btn primary" type="submit">Save AI settings</button></div></form>
         <form class="card card-pad" id="se-google"><h3 style="margin-bottom:4px">Phone alerts &amp; Google Tasks</h3>
           <p class="muted small" style="margin-bottom:14px">Phone alerts need nothing set up: each staff member turns them on from their profile (${+s.push_devices} so far). They need the portal on HTTPS.</p>
           <p class="muted small" style="margin-bottom:10px">For Google Tasks, make an OAuth client in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> (type <b>Web application</b>) and turn on the <b>Google Tasks API</b>. Staff then link their own Google account from their profile (${+s.google.linked} linked).</p>
@@ -519,6 +540,18 @@
       e.preventDefault();
       try { await App.busy(e.submitter, () => api('settings_save', { data: { google: App.formData(e.target) } })); toast('Google settings saved'); } catch (err) { App.fail(err); }
     });
+    $('#se-ai', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await App.busy(e.submitter, () => api('settings_save', { data: { ai: App.formData(e.target) } })); toast('AI settings saved'); } catch (err) { App.fail(err); }
+    });
+    const aiProv = () => $$('[data-ai-prov]', ctx.el).forEach((d) => { d.hidden = d.dataset.aiProv !== $('#se-aiprov', ctx.el).value; });
+    $('#se-aiprov', ctx.el).addEventListener('change', aiProv);
+    aiProv();
+    $$('[data-ai-test]', ctx.el).forEach((b) => b.addEventListener('click', async (e) => {
+      const p = b.dataset.aiTest;
+      const data = p === 'openai' ? { provider: p, key: $('#se-oaikey', ctx.el).value, model: $('#se-oaimodel', ctx.el).value } : { provider: p, key: $('#se-aikey', ctx.el).value };
+      try { const r = await App.busy(e.currentTarget, () => api('ai_test', { data })); toast(r.message); } catch (err) { App.fail(err); }
+    }));
     $('#se-test', ctx.el).addEventListener('click', async (e) => {
       try { const r = await App.busy(e.currentTarget, () => api('smtp_test', { data: {} })); toast(r.message); } catch (err) { App.fail(err); }
     });
