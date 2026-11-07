@@ -594,5 +594,12 @@
       if (!(await App.confirm('Disconnect Google Drive?', 'Files already made stay in the Google account. Staff can\'t make new Google files until you connect again.', { ok: 'Disconnect', danger: true }))) return;
       try { await App.busy(e.currentTarget, () => App.api('gdrive_disconnect', { data: {} })); gdriveCard(box); } catch (err) { App.fail(err); }
     });
+    // Coming from "Connect Google Drive in Settings" or back from Google: show this card.
+    if (flag) {
+      box.style.scrollMarginTop = '80px';
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      box.style.outline = '2px solid var(--brand)';
+      setTimeout(() => { box.style.outline = ''; }, 2500);
+    }
   }
 })();
