@@ -229,7 +229,10 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       <div class="field" id="nd-eng-f"><div class="label">Where to edit it</div><div class="opts">
         <label class="opt"><input type="radio" name="engine" value="builtin" ${engine0 === 'builtin' ? 'checked' : ''}><span><i class="ti ti-layout-dashboard"></i>Built-in editor</span></label>
         <label class="opt"><input type="radio" name="engine" value="google" ${engine0 === 'google' ? 'checked' : ''} ${google ? '' : 'disabled'}><span><i class="ti ti-brand-google-drive"></i>Google ${google ? '' : '(not connected)'}</span></label></div>
-        <div class="help" id="nd-eng-help"></div></div></form>`,
+        <div class="help" id="nd-eng-help"></div>
+        ${google ? '' : `<div class="note-box" style="margin-top:8px"><i class="ti ti-brand-google-drive"></i> ${App.isAdmin()
+    ? 'Google isn\'t connected yet. <a href="#/settings?gdrive=setup">Connect Google Drive in Settings</a> to use Google Sheets and Docs.'
+    : 'Google isn\'t connected yet. Ask an admin to connect Google Drive in Settings. You can use the built-in editor meanwhile.'}</div>`}</div></form>`,
     `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="nd-ok"><i class="ti ti-plus"></i>Create</button>`, { wide: true });
     const form = $('#nd-form', el);
     const val = (n) => form.querySelector(`[name="${n}"]:checked`)?.value;
