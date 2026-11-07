@@ -310,17 +310,21 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
     $$('[data-jdoc-new]', box).forEach((b) => b.addEventListener('click', () => App.newDoc({ job: { id: j.id, ref: j.ref, title: j.title }, kind: b.dataset.jdocNew })));
   };
 
-  const st = { tab: 'all', kind: '', engine: '', q: '' };
-  async function docsView(ctx) {
+  const stAll = { tab: 'all', kind: '', engine: '', q: '' };
+  const stSheets = { tab: 'all', kind: 'sheet', engine: '', q: '' };
+  /** The Sheets & docs page, or with sheetsOnly the Spreadsheet page (spreadsheets only). */
+  async function docsView(ctx, sheetsOnly = false) {
     const mgmt = isManagement();
+    const st = sheetsOnly ? stSheets : stAll;
     const tabs = [['all', mgmt ? 'All files' : 'My files', 'files'], ['jobs', 'On job orders', 'clipboard-list'], ['general', 'Not on a job', 'file'], ['templates', 'Templates', 'template']];
     if (mgmt) tabs.splice(1, 0, ['mine', 'Mine', 'user']);
     ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>Sheets &amp; docs</h1><p class="muted">Spreadsheets and documents for your work: materials used, measurements, costs, inspection sheets and reports.${mgmt ? ' You can open every file staff make.' : ''}</p></div>
-        <div class="actions"><button class="btn" id="dc-doc"><i class="ti ti-file-plus"></i>New document</button><button class="btn primary" id="dc-sheet"><i class="ti ti-table-plus"></i>New spreadsheet</button></div></div>
+      <div class="page-head"><div><h1>${sheetsOnly ? 'Spreadsheet' : 'Sheets &amp; docs'}</h1><p class="muted">${sheetsOnly ? 'Spreadsheets for your work: materials used, measurements, costs, inventories and inspection sheets. Upload an Excel file or start a new one.'
+          : 'Spreadsheets and documents for your work: materials used, measurements, costs, inspection sheets and reports.'}${mgmt ? ' You can open every file staff make.' : ''}</p></div>
+        <div class="actions">${sheetsOnly ? '' : '<button class="btn" id="dc-doc"><i class="ti ti-file-plus"></i>New document</button>'}<button class="btn primary" id="dc-sheet"><i class="ti ti-table-plus"></i>New spreadsheet</button></div></div>
       <div class="seg" id="dc-tabs" style="margin-bottom:12px;max-width:100%;overflow-x:auto">${tabs.map(([k, l, i]) => `<button data-t="${k}" class="${k === st.tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}</button>`).join('')}</div>
       <div class="filters" id="dc-filters"><input type="search" name="q" placeholder="Search by name, job or staff…" value="${esc(st.q)}">
-        <select name="kind">${App.opts([['sheet', 'Spreadsheets'], ['doc', 'Documents']], st.kind, { placeholder: 'All types' })}</select>
+        ${sheetsOnly ? '' : `<select name="kind">${App.opts([['sheet', 'Spreadsheets'], ['doc', 'Documents']], st.kind, { placeholder: 'All types' })}</select>`}
         <select name="engine">${App.opts([['builtin', 'Built-in'], ['google', 'Google']], st.engine, { placeholder: 'Built-in & Google' })}</select></div>
       <div id="dc-google"></div>
       <div id="dc-list">${App.loading()}</div>`;
@@ -334,14 +338,14 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       $('#dc-gmail', g)?.addEventListener('click', (e) => { e.preventDefault(); changeGoogleEmail(r.my_google_email, load); });
       const tplNew = st.tab === 'templates' && mgmt ? '<button class="btn sm" id="dc-tpl-new"><i class="ti ti-plus"></i>New template</button>' : '';
       if (!r.docs.length) {
-        box.innerHTML = `<div class="card">${App.empty(st.tab === 'templates' ? 'template' : 'files', st.tab === 'templates' ? 'No templates yet' : 'No files yet',
+        box.innerHTML = `<div class="card">${App.empty(st.tab === 'templates' ? 'template' : 'files', st.tab === 'templates' ? 'No templates yet' : sheetsOnly ? 'No spreadsheets yet' : 'No files yet',
           st.tab === 'templates' ? (mgmt ? 'Make a template (for example a materials-used sheet) so staff can start from it.' : 'Management hasn\'t made any templates yet.')
-            : 'Make a spreadsheet or document, or open a job order and add one there.', tplNew)}</div>`;
+            : sheetsOnly ? 'Make a spreadsheet, or open a job order and add one there.' : 'Make a spreadsheet or document, or open a job order and add one there.', tplNew)}</div>`;
       } else {
         box.innerHTML = `${tplNew ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${tplNew}</div>` : ''}<div class="card">${docRows(r.docs)}</div>`;
       }
       bindRows(box);
-      $('#dc-tpl-new', box)?.addEventListener('click', () => App.newDoc({ template: true }));
+      $('#dc-tpl-new', box)?.addEventListener('click', () => App.newDoc({ template: true, kind: sheetsOnly ? 'sheet' : undefined }));
     };
     $$('#dc-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => {
       st.tab = b.dataset.t;
@@ -350,7 +354,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
     }));
     $('#dc-filters', ctx.el).addEventListener('input', App.debounce((e) => { if (e.target.name) { st[e.target.name] = e.target.value; load().catch(App.fail); } }, 300));
     $('#dc-sheet', ctx.el).addEventListener('click', () => App.newDoc({ kind: 'sheet', template: st.tab === 'templates' && mgmt }));
-    $('#dc-doc', ctx.el).addEventListener('click', () => App.newDoc({ kind: 'doc', template: st.tab === 'templates' && mgmt }));
+    $('#dc-doc', ctx.el)?.addEventListener('click', () => App.newDoc({ kind: 'doc', template: st.tab === 'templates' && mgmt }));
     ctx.refresh = () => load().catch(() => {});
     await load();
   }
@@ -614,6 +618,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
     if (d.can_edit) setState('<i class="ti ti-cloud-check"></i> Saved');
   }
 
-  App.route('docs', docsView, { title: 'Sheets & docs', live: true });
+  App.route('docs', (ctx) => docsView(ctx), { title: 'Sheets & docs', live: true });
+  App.route('spreadsheets', (ctx) => docsView(ctx, true), { title: 'Spreadsheet', live: true });
   App.route('docs/:id', docView, { title: 'Sheets & docs', nav: 'docs' });
 })();
