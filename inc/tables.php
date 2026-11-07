@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -754,6 +754,28 @@ function table_sql(): array
             KEY idx_status (status, created_at),
             KEY idx_run (run_id)
         ) $t",
+        // v25: spreadsheets and documents staff prepare, on a job or on their own. 'builtin' ones are edited in the portal and
+        // kept in content (JSON); 'google' ones are Google Sheets/Docs owned by the company Google account. Templates have is_template = 1.
+        "CREATE TABLE IF NOT EXISTS work_docs (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            job_id INT UNSIGNED NULL,
+            engine VARCHAR(8) NOT NULL DEFAULT 'builtin',
+            kind VARCHAR(5) NOT NULL DEFAULT 'sheet',
+            title VARCHAR(190) NOT NULL,
+            content LONGTEXT NULL,
+            gfile_id VARCHAR(100) NULL,
+            web_url VARCHAR(500) NULL,
+            is_template TINYINT(1) NOT NULL DEFAULT 0,
+            version INT UNSIGNED NOT NULL DEFAULT 1,
+            created_by INT UNSIGNED NOT NULL,
+            updated_by INT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            deleted_at DATETIME NULL,
+            KEY idx_job (job_id, deleted_at),
+            KEY idx_user (created_by, deleted_at),
+            KEY idx_template (is_template, deleted_at)
+        ) $t",
     ];
 }
 
@@ -836,6 +858,8 @@ function column_sql(): array
         // v24: which AI answered (claude or openai) and the exact model
         ['ai_runs', 'provider', "VARCHAR(10) NOT NULL DEFAULT 'claude'"],
         ['ai_runs', 'model', "VARCHAR(60) NOT NULL DEFAULT ''"],
+        // v25: the Google account a staff member edits company Google Sheets/Docs with (empty = their portal email)
+        ['users', 'google_email', "VARCHAR(190) NOT NULL DEFAULT ''"],
     ];
 }
 

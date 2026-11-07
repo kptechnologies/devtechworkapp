@@ -246,6 +246,7 @@ function act_job_get(array $in, array $me): void
     $j['overdue'] = in_array($j['status'], ['open', 'in_progress', 'returned', 'requested'], true) && is_overdue($j['due_date'], $j['due_time']);
     $j['is_assignee'] = in_array($me['id'], array_map('intval', array_column($j['assignees'], 'id')), true);
     $j['tasks'] = job_tasks($j['id'], $me);
+    $j['docs'] = function_exists('job_docs') ? job_docs($j['id']) : [];
     $j['pending_extension'] = pending_extensions($j['id'])[0] ?? null;
     $j['self_closed'] = (int)$j['self_closed'];
     // When the job's staff may close it themselves if no admin has checked it.

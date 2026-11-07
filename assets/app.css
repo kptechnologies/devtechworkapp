@@ -526,3 +526,31 @@ a.link-chip:hover { border-color: var(--brand); color: var(--brand-text); }
 .vote-btn:disabled { cursor: default; opacity: .7; }
 .idea-status-line { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: 13px; color: var(--text-2); }
 .idea-status-line > .ti { color: var(--brand); margin-top: 2px; }
+
+/* Sheets & docs editor */
+.doc-page { display: flex; flex-direction: column; min-height: calc(100dvh - 120px); }
+.doc-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.doc-name { flex: 1; min-width: 180px; }
+.doc-name input { width: 100%; border: 1px solid transparent; background: transparent; font: inherit; font-size: 17px; font-weight: 600; color: var(--text); padding: 3px 6px; border-radius: 8px; }
+.doc-name input:hover:not([readonly]), .doc-name input:focus { border-color: var(--border-2); background: var(--surface); outline: none; }
+.doc-name .small { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.doc-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.sheet-host { height: calc(100dvh - 190px); min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #fff; color: #222; }
+/* The spreadsheet library hides its toolbar on phones; staff on site need it (extra buttons fold into its "more" menu). */
+.sheet-host .x-spreadsheet-toolbar { display: block; }
+.docx-host { background: var(--surface-3); border-radius: var(--radius); padding: 0 0 24px; }
+.docx-host .ql-toolbar.ql-snow { position: sticky; top: 0; z-index: 2; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.docx-host .ql-container.ql-snow { border: 0; font: inherit; font-size: 15px; }
+.docx-host .ql-editor { max-width: 820px; min-height: calc(100dvh - 260px); margin: 18px auto 0; background: #fff; color: #222; padding: 48px 56px; box-shadow: var(--shadow); border-radius: 4px; line-height: 1.55; }
+.docx-host .ql-editor table { border-collapse: collapse; width: 100%; }
+.docx-host .ql-editor td { border: 1px solid #bbb; padding: 4px 6px; }
+.doc-frame { width: 100%; height: calc(100dvh - 200px); min-height: 460px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 4px; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; border-radius: 7px; cursor: pointer; }
+.menu-item:hover { background: var(--surface-2); }
+@media (max-width: 760px) {
+  .docx-host .ql-editor { padding: 24px 18px; margin-top: 10px; }
+  .sheet-host { height: calc(100dvh - 250px); }
+}

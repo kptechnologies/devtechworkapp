@@ -10,7 +10,7 @@
   const PRIORITY = { urgent: ['Urgent', 'bad'], high: ['High', 'out'], normal: ['Normal', ''], low: ['Low', ''] };
   const jobPill = (s) => { const [l, t] = JOB_STATUS[s] || [s, '']; return `<span class="pill ${t}">${esc(l)}</span>`; };
   const prioPill = (p) => (p === 'normal' || p === 'low' ? '' : `<span class="pill ${PRIORITY[p]?.[1] || ''}"><i class="ti ti-flag"></i>${esc(PRIORITY[p]?.[0] || p)}</span>`);
-  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag', task: 'checkbox', extension: 'clock-plus' };
+  const KIND_ICON = { created: 'circle-plus', assign: 'users', status: 'arrows-exchange', complete: 'circle-check', comment: 'message', followup: 'message-forward', report: 'clipboard-text', visit: 'map-pin', edit: 'edit', priority: 'flag', task: 'checkbox', extension: 'clock-plus', doc: 'table' };
 
   /** What a shared link points at, for its icon and label. */
   function linkKind(url) {
@@ -435,6 +435,7 @@
         ${j.description ? `<div class="sec-title">What needs to be done</div><p style="white-space:pre-wrap">${esc(j.description)}</p>` : ''}
         ${signoffHtml(j)}
         ${tasksHtml(j, admin)}
+        <div id="jd-docs">${App.jobDocsHtml ? App.jobDocsHtml(j) : ''}</div>
         <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between">Assigned to
           ${admin && !['done', 'cancelled'].includes(j.status) ? '<button class="btn sm ghost" id="jd-assign"><i class="ti ti-user-plus"></i>Assign / reassign</button>' : ''}</div>
         <div class="chips">${assigneeChips(j.assignees)}</div>
@@ -462,6 +463,7 @@
         try { await App.busy(e.submitter, () => api('job_update', { data: { id: j.id, body, links }, files: up.files() })); toast('Update posted'); render(); } catch (err) { App.fail(err); }
       });
       $('#jd-assign', el)?.addEventListener('click', () => assignJob(j, render));
+      if (App.bindJobDocs) App.bindJobDocs($('#jd-docs', el), j);
       $('#jd-ai', el)?.addEventListener('click', (e) => App.aiJobNextSteps(e.currentTarget, j.id, render));
       $('#jd-task-add', el)?.addEventListener('click', () => editTask(j, null, render));
       $$('[data-ext-decide]', el).forEach((b) => b.addEventListener('click', () => decideExtension(b, +b.closest('[data-ext]').dataset.ext, b.dataset.extDecide, render)));
