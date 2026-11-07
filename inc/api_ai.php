@@ -2,6 +2,7 @@
 /* AI assistant endpoints (management only). The AI work itself is in ai.php. */
 
 require_once __DIR__ . '/ai.php';
+require_once __DIR__ . '/ai_chat.php';
 
 function ai_or_fail(callable $fn): void
 {
@@ -127,6 +128,54 @@ function act_ai_suggestion_act(array $in, array $me): void
     }
     q('UPDATE ai_suggestions SET status = ?, acted_by = ?, acted_at = NOW() WHERE id = ?', [$status, $me['id'], $s['id']]);
     audit('ai_suggestion_' . $status, 'ai_suggestion', (int)$s['id'], ['type' => $s['type']]);
+    json_out(['ok' => true]);
+}
+
+/* ---------------------------------------------------------------- Ask AI chat */
+
+/** Send a message in a chat (id 0 starts a new one). The AI may look things up and draft posts for approval. */
+function act_ai_chat_send(array $in, array $me): void
+{
+    require_management();
+    $text = str_in($in['text'] ?? '', 4000);
+    if ($text === '') {
+        fail('Type a question or request.');
+    }
+    try {
+        $chat = ai_chat_send((int)($in['id'] ?? 0), $text, $me, ai_in_provider($in));
+    } catch (RuntimeException $e) {
+        fail($e->getMessage(), 503);
+    }
+    json_out(['ok' => true, 'chat' => $chat]);
+}
+
+/** One chat (with id) or my recent chats. */
+function act_ai_chats(array $in, array $me): void
+{
+    require_management();
+    if ($id = (int)($in['id'] ?? 0)) {
+        try {
+            json_out(['ok' => true, 'chat' => ai_chat_get($id, $me)]);
+        } catch (RuntimeException $e) {
+            fail($e->getMessage(), 404);
+        }
+    }
+    $rows = q('SELECT id, title, provider, updated_at FROM ai_chats WHERE user_id = ? ORDER BY updated_at DESC LIMIT 30', [$me['id']])->fetchAll();
+    json_out(['ok' => true, 'chats' => array_map(fn($r) => ['id' => (int)$r['id'], 'title' => $r['title'],
+        'provider_name' => AI_PROVIDERS[$r['provider']] ?? 'AI', 'updated_at' => $r['updated_at']], $rows)]);
+}
+
+function act_ai_chat_delete(array $in, array $me): void
+{
+    require_management();
+    try {
+        $c = ai_chat_load((int)($in['id'] ?? 0), $me);
+    } catch (RuntimeException $e) {
+        fail($e->getMessage(), 404);
+    }
+    q('DELETE FROM ai_chats WHERE id = ?', [$c['id']]);
+    // Drafts not acted on go with it; created ones stay as a record.
+    q("DELETE FROM ai_suggestions WHERE chat_id = ? AND status = 'pending'", [$c['id']]);
     json_out(['ok' => true]);
 }
 

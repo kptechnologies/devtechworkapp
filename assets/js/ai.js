@@ -1,10 +1,10 @@
-/* AI assistant: daily brief, staff review, report summaries, job next steps and suggested actions (management only). */
+/* AI assistant: Ask AI chat, daily brief, staff review, report summaries, job next steps and suggested actions (management only). */
 (() => {
   const { $, $$, esc, api, toast, fmtDate, fmtDateTime, isManagement } = App;
 
   const SEV = { urgent: ['bad', 'alert-octagon', 'Urgent'], warning: ['out', 'alert-triangle', 'Watch'], info: ['info', 'info-circle', 'Note'], good: ['in', 'thumb-up', 'Good'] };
-  const TYPE = { job_task: ['list-check', 'Task on job'], followup: ['message-forward', 'Follow-up'], reminder: ['bell', 'Reminder'], job: ['clipboard-plus', 'New job'] };
-  const TABS = [['brief', 'Daily brief'], ['staff', 'Staff review'], ['reports', 'Reports'], ['suggestions', 'Suggestions']];
+  const TYPE = { job_task: ['list-check', 'Task on job'], followup: ['message-forward', 'Follow-up'], reminder: ['bell', 'Reminder'], job: ['clipboard-plus', 'New job'], notice: ['speakerphone', 'Notice'], memo: ['mail', 'Memo'] };
+  const TABS = [['chat', 'Ask AI'], ['brief', 'Daily brief'], ['staff', 'Staff review'], ['reports', 'Reports'], ['suggestions', 'Suggestions']];
   const iso = (d) => d.toISOString().slice(0, 10);
   const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
 
@@ -100,12 +100,21 @@
     const p = s.payload || {};
     let staff = [];
     try { staff = await staffList(); } catch (e) { App.fail(e); return; }
-    const picked = new Set((p.assignee_ids || []).map(Number));
+    const picked = new Set([...(p.assignee_ids || []), ...(p.user_ids || [])].map(Number));
     if (s.type === 'reminder' && s.user_id) picked.add(s.user_id);
     const people = (multi) => `<div class="field"><label>${multi ? 'Who' : 'Send to'}</label><div class="chips" style="max-height:180px;overflow:auto">
       ${staff.map((u) => `<label class="check-row" style="margin:0 10px 6px 0"><input type="${multi ? 'checkbox' : 'radio'}" name="who" value="${u.id}" ${picked.has(+u.id) ? 'checked' : ''}><span>${esc(u.name)}</span></label>`).join('')}</div></div>`;
     const due = `<div class="field"><label>Due date</label><input type="date" name="due_date" value="${esc(p.due_date || '')}" min="${iso(new Date())}"></div>`;
+    const audience = (list, cur) => `<div class="field"><label>Who gets it</label><select name="audience">${App.opts(list, cur)}</select></div>`;
     const fields = {
+      notice: `<div class="field"><label>Title</label><input name="title" value="${esc(p.title)}" maxlength="190"></div>
+        <div class="field"><label>Notice</label><textarea name="text" rows="6">${esc(p.text)}</textarea></div>
+        <div class="form-row">${audience([['all_staff', 'All staff'], ['everyone', 'Everyone, management too']], p.audience || 'all_staff')}
+          <div class="field"><label>Show until (optional)</label><input type="date" name="expires" value="${esc(p.expires || '')}" min="${iso(new Date())}"></div></div>
+        <label class="check-row"><input type="checkbox" name="urgent" ${p.urgent ? 'checked' : ''}><span>Urgent</span></label>`,
+      memo: `<div class="field"><label>Subject</label><input name="title" value="${esc(p.title)}" maxlength="190"></div>
+        <div class="field"><label>Memo</label><textarea name="text" rows="6">${esc(p.text)}</textarea></div>
+        ${audience([['all_staff', 'All staff'], ['management', 'Management'], ['selected', 'Only the people ticked below']], p.audience || 'all_staff')}${people(true)}`,
       job_task: `<div class="field"><label>Task</label><input name="title" value="${esc(p.title)}" maxlength="190"></div>
         <div class="field"><label>Notes</label><textarea name="text" rows="3">${esc(p.text)}</textarea></div>${due}${people(true)}`,
       followup: `<div class="field"><label>Follow-up note to the people on ${esc(s.job_ref)}</label><textarea name="text" rows="4">${esc(p.text || p.title)}</textarea></div>`,
@@ -126,7 +135,11 @@
       const who = $$('[name="who"]:checked', form).map((x) => +x.value);
       try {
         await App.busy(e.currentTarget, async () => {
-          if (s.type === 'job_task') {
+          if (s.type === 'notice') {
+            await api('notice_post', { data: { title: d.title, body: d.text, audience: d.audience, expires: d.expires, urgent: form.urgent.checked } });
+          } else if (s.type === 'memo') {
+            await api('memo_send', { data: { kind: 'memo', subject: d.title, body: d.text, audience: d.audience, user_ids: who } });
+          } else if (s.type === 'job_task') {
             await api('job_task_save', { data: { id: s.job_id, title: d.title, notes: d.text, due_date: d.due_date, assignees: who } });
           } else if (s.type === 'followup') {
             if (!d.text.trim()) throw new Error('Write the follow-up note.');
@@ -138,7 +151,7 @@
           await api('ai_suggestion_act', { data: { id: s.id, status: 'accepted', title: d.title, text: d.text, user_id: who[0] || s.user_id } });
         });
         App.closeTop();
-        toast(s.type === 'reminder' ? 'Reminder sent' : s.type === 'followup' ? 'Follow-up posted' : s.type === 'job' ? 'Job created' : 'Task added');
+        toast(s.type === 'notice' ? 'Notice posted' : s.type === 'memo' ? 'Memo sent' : s.type === 'reminder' ? 'Reminder sent' : s.type === 'followup' ? 'Follow-up posted' : s.type === 'job' ? 'Job created' : 'Task added');
         reload();
       } catch (err) {
         if (err.fields) App.showErrors(form, err.fields);
@@ -183,13 +196,121 @@
   const rangeFields = (from, to) => `<div class="field" style="margin:0"><label>From</label><input type="date" name="from" value="${from}"></div>
     <div class="field" style="margin:0"><label>To</label><input type="date" name="to" value="${to}"></div>`;
 
+  /* ------------------------------------------------------------------ Ask AI chat */
+
+  const EXAMPLES = [
+    'Which jobs are overdue, and who is on them?',
+    'Review how each supervisor did this week',
+    'Which schools reported faulty laptops this month?',
+    'Who was late or missed clock-out this week?',
+    'Check stalled jobs and draft follow-ups for them',
+    'Draft a notice reminding all staff to send daily reports by 5pm',
+  ];
+
+  function bubble(t) {
+    if (t.role === 'user') {
+      return `<div style="display:flex;justify-content:flex-end"><div style="max-width:85%;background:var(--brand);color:var(--on-brand);padding:10px 14px;border-radius:14px 14px 4px 14px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(t.text)}</div></div>`;
+    }
+    return `<div style="display:flex;gap:10px;align-items:flex-start"><div class="li-icon tone-brand" style="flex:none"><i class="ti ti-sparkles"></i></div>
+      <div style="max-width:90%;min-width:0">${t.looked.length ? `<div class="small faint" style="margin:2px 0 6px"><i class="ti ti-search"></i> Looked at ${esc(t.looked.join(', '))}</div>` : ''}
+        <div style="background:var(--surface-2);border:1px solid var(--border);padding:10px 14px;border-radius:4px 14px 14px 14px;overflow-wrap:anywhere">${prose(t.text) || '<span class="faint">(no answer text)</span>'}</div></div></div>`;
+  }
+
+  async function chatTab(body, st) {
+    let chatId = +App.store.get('ai-chat', 0) || 0;
+    let chat = null;
+    body.innerHTML = `
+      <div class="card" style="display:flex;flex-direction:column;margin-bottom:14px">
+        <div class="card-head" style="gap:8px;flex-wrap:wrap"><h3 id="ai-ct" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Ask AI</h3>
+          <select id="ai-cl" style="max-width:240px" aria-label="Earlier chats"></select>
+          <button class="btn sm ghost" id="ai-cnew"><i class="ti ti-plus"></i>New chat</button>
+          <button class="btn sm ghost" id="ai-cdel" aria-label="Delete chat" title="Delete chat"><i class="ti ti-trash"></i></button></div>
+        <div id="ai-msgs" style="overflow:auto;padding:16px;display:grid;gap:14px;align-content:start;min-height:280px;max-height:60vh"></div>
+        <form id="ai-cf" style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--border);align-items:flex-end">
+          <textarea name="text" rows="2" placeholder="Ask about jobs, staff, reports, attendance or schools, or ask it to draft a notice, memo, job, task or reminder." style="flex:1;resize:vertical;min-width:0" ${st.problem ? 'disabled' : ''}></textarea>
+          <button class="btn primary" type="submit" ${st.problem ? 'disabled' : ''}><i class="ti ti-send"></i>Send</button></form>
+      </div>
+      <div id="ai-cdrafts"></div>`;
+    const msgs = $('#ai-msgs', body);
+    const form = $('#ai-cf', body);
+    const sel = $('#ai-cl', body);
+    const drafts = $('#ai-cdrafts', body);
+
+    const drawDrafts = () => {
+      const list = chat?.suggestions || [];
+      drafts.innerHTML = list.length ? `<div class="card"><div class="card-head"><h3>Drafts from this chat</h3><span class="faint small">Nothing is posted until you click Create</span></div>
+        <ul class="list">${list.map(suggestionRow).join('')}</ul></div>` : '';
+      bindSuggestions(drafts, list, reloadChat);
+    };
+    const drawMsgs = () => {
+      $('#ai-ct', body).textContent = chat ? chat.title : 'Ask AI';
+      msgs.innerHTML = chat && chat.turns.length ? chat.turns.map(bubble).join('')
+        : `<div class="muted" style="text-align:center;padding:16px 8px"><div style="font-size:28px"><i class="ti ti-sparkles"></i></div>
+            <p>Ask anything about the portal. The AI looks things up itself and can draft posts for you to check and create.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">${EXAMPLES.map((e) => `<button type="button" class="btn sm ghost" data-ex>${esc(e)}</button>`).join('')}</div></div>`;
+      $$('[data-ex]', msgs).forEach((b) => b.addEventListener('click', () => { form.text.value = b.textContent; form.text.focus(); }));
+      msgs.scrollTop = msgs.scrollHeight;
+      $('#ai-cdel', body).hidden = !chat;
+      drawDrafts();
+    };
+    const loadList = async () => {
+      try {
+        const { chats } = await api('ai_chats');
+        sel.innerHTML = '<option value="0">Earlier chats…</option>' + chats.map((c) =>
+          `<option value="${c.id}" ${c.id === chatId ? 'selected' : ''}>${esc(c.title.slice(0, 50))} · ${esc(fmtDateTime(c.updated_at))}</option>`).join('');
+        sel.hidden = !chats.length;
+      } catch { sel.hidden = true; }
+    };
+    async function reloadChat() {
+      if (chatId) {
+        try { chat = (await api('ai_chats', { query: { id: chatId } })).chat; } catch { chatId = 0; chat = null; App.store.set('ai-chat', 0); }
+      } else chat = null;
+      drawMsgs();
+      App.refreshBadges?.();
+    }
+    const open = (id) => { chatId = id; App.store.set('ai-chat', id); sel.value = String(id); reloadChat(); };
+
+    sel.addEventListener('change', () => open(+sel.value));
+    $('#ai-cnew', body).addEventListener('click', () => { open(0); form.text.focus(); });
+    $('#ai-cdel', body).addEventListener('click', async () => {
+      if (!chat || !(await App.confirm('Delete chat?', 'The conversation and any drafts not yet created will be removed.', { ok: 'Delete', danger: true }))) return;
+      try { await api('ai_chat_delete', { data: { id: chat.id } }); open(0); loadList(); } catch (err) { App.fail(err); }
+    });
+    form.text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = form.text.value.trim();
+      if (!text) return;
+      if (!chat) msgs.innerHTML = '';
+      msgs.insertAdjacentHTML('beforeend', bubble({ role: 'user', text, looked: [] }) + `<div id="ai-wait" class="muted small" style="display:flex;gap:10px;align-items:center">
+        <span class="spinner" style="width:16px;height:16px;border-width:2px"></span>Looking through the portal… this can take a minute.</div>`);
+      msgs.scrollTop = msgs.scrollHeight;
+      form.text.value = '';
+      try {
+        const r = await App.busy($('button[type="submit"]', form), () => api('ai_chat_send', { data: { id: chatId, text, provider: chosenProvider() } }));
+        chat = r.chat;
+        chatId = chat.id;
+        App.store.set('ai-chat', chatId);
+        drawMsgs();
+        loadList();
+        App.refreshBadges?.();
+      } catch (err) {
+        form.text.value = text;
+        App.fail(err);
+        reloadChat();
+      }
+    });
+    await loadList();
+    reloadChat();
+  }
+
   App.route('ai', async (ctx) => {
-    let tab = App.store.get('ai-tab', 'brief');
+    let tab = App.store.get('ai-tab', 'chat');
     const st = await api('ai_status');
     const draw = async () => {
       App.store.set('ai-tab', tab);
       ctx.el.innerHTML = `
-        <div class="page-head"><div><h1>AI assistant</h1><p class="muted">The AI reads jobs, staff reports and attendance, then recommends what to do. You approve every action.</p></div>
+        <div class="page-head"><div><h1>AI assistant</h1><p class="muted">Ask the AI about anything in the portal, or have it brief and review. It can draft posts, and you approve every one.</p></div>
           <div class="actions">${st.providers.length > 1 ? `<div class="seg" id="ai-prov" title="Which AI answers">${st.providers.map((p) =>
             `<button data-p="${p.id}" class="${p.id === (st.providers.some((x) => x.id === chosenProvider()) ? chosenProvider() : st.default_provider) ? 'on' : ''}"><i class="ti ti-sparkles"></i>${esc(p.name)}</button>`).join('')}</div>` : ''}
           <div class="seg" id="ai-tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'suggestions' && st.pending ? ` (${st.pending})` : ''}</button>`).join('')}</div></div></div>
@@ -203,7 +324,9 @@
       const body = $('#ai-body', ctx.el);
       const reload = async () => { Object.assign(st, await api('ai_status')); if (tab === 'suggestions') draw(); };
 
-      if (tab === 'brief') {
+      if (tab === 'chat') {
+        chatTab(body, st);
+      } else if (tab === 'brief') {
         body.innerHTML = `<div class="card card-pad" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
             <div><b>Today's brief</b><div class="muted small">Overdue and stalled jobs, problems in the last two days of reports and attendance, and what to do today.${st.brief ? '' : ' Sent automatically each morning when turned on in Settings.'}</div></div>
             <button class="btn primary" id="ai-go" ${st.problem ? 'disabled' : ''}><i class="ti ti-sparkles"></i>${st.brief ? 'Make a new brief' : 'Make today\'s brief'}</button></div>
