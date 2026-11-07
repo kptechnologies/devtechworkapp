@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -754,6 +754,20 @@ function table_sql(): array
             KEY idx_status (status, created_at),
             KEY idx_run (run_id)
         ) $t",
+        // v26: "Ask AI" chats, kept in the provider's own message format so the AI sees its earlier look-ups
+        "CREATE TABLE IF NOT EXISTS ai_chats (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            provider VARCHAR(10) NOT NULL DEFAULT 'claude',
+            model VARCHAR(60) NOT NULL DEFAULT '',
+            title VARCHAR(190) NOT NULL DEFAULT '',
+            messages MEDIUMTEXT NOT NULL,
+            input_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+            output_tokens INT UNSIGNED NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            KEY idx_user (user_id, updated_at)
+        ) $t",
         // v25: spreadsheets and documents staff prepare, on a job or on their own. 'builtin' ones are edited in the portal and
         // kept in content (JSON); 'google' ones are Google Sheets/Docs owned by the company Google account. Templates have is_template = 1.
         "CREATE TABLE IF NOT EXISTS work_docs (
@@ -860,6 +874,8 @@ function column_sql(): array
         ['ai_runs', 'model', "VARCHAR(60) NOT NULL DEFAULT ''"],
         // v25: the Google account a staff member edits company Google Sheets/Docs with (empty = their portal email)
         ['users', 'google_email', "VARCHAR(190) NOT NULL DEFAULT ''"],
+        // v26: drafts the AI made in an "Ask AI" chat (run_id is 0 for those)
+        ['ai_suggestions', 'chat_id', 'INT UNSIGNED NULL'],
     ];
 }
 

@@ -364,6 +364,10 @@ function ai_suggestions_list(array $f): array
         $where[] = 's.run_id = ?';
         $p[] = (int)$f['run_id'];
     }
+    if (!empty($f['chat_id'])) {
+        $where[] = 's.chat_id = ?';
+        $p[] = (int)$f['chat_id'];
+    }
     if (!empty($f['status'])) {
         $where[] = 's.status = ?';
         $p[] = $f['status'];
