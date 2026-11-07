@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -790,6 +790,16 @@ function table_sql(): array
             KEY idx_user (created_by, deleted_at),
             KEY idx_template (is_template, deleted_at)
         ) $t",
+        // v27: people a spreadsheet/document is shared with, beyond its maker, management and (when access = 'job') its job's staff
+        "CREATE TABLE IF NOT EXISTS work_doc_access (
+            doc_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            can_edit TINYINT(1) NOT NULL DEFAULT 1,
+            added_by INT UNSIGNED NULL,
+            added_at DATETIME NOT NULL,
+            PRIMARY KEY (doc_id, user_id),
+            KEY idx_user (user_id)
+        ) $t",
     ];
 }
 
@@ -876,6 +886,8 @@ function column_sql(): array
         ['users', 'google_email', "VARCHAR(190) NOT NULL DEFAULT ''"],
         // v26: drafts the AI made in an "Ask AI" chat (run_id is 0 for those)
         ['ai_suggestions', 'chat_id', 'INT UNSIGNED NULL'],
+        // v27: who a work doc is open to: 'job' = everyone on its job (and the people it's shared with), 'picked' = only the people it's shared with
+        ['work_docs', 'access', "VARCHAR(8) NOT NULL DEFAULT 'job'"],
     ];
 }
 

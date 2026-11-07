@@ -3,7 +3,8 @@
  * Sheets & docs: spreadsheets and documents staff prepare for the work they do, on a job order or on their own.
  *  - 'builtin' files are edited inside the portal (spreadsheet grid or rich-text editor) and kept in work_docs.content.
  *  - 'google' files are Google Sheets/Docs in the company Google Drive (inc/gdrive.php); the portal keeps the link.
- * Who can open one: management, whoever made it, and anyone who can see its job. The same people can edit it.
+ * Who can open one: management, whoever made it, the people it's shared with (can edit or can view), and, unless its
+ * access is 'picked', anyone who can see its job (they can edit). The maker and management choose who it's shared with.
  * Templates (is_template = 1) are made by management; everyone can start a new file from one.
  */
 
@@ -11,8 +12,8 @@ require_once __DIR__ . '/gdrive.php';
 
 const DOC_KINDS = ['sheet' => 'spreadsheet', 'doc' => 'document'];
 const DOC_ENGINES = ['builtin', 'google'];
-const DOC_LIST_COLS = 'd.id, d.job_id, d.engine, d.kind, d.title, d.gfile_id, d.web_url, d.is_template, d.version, d.created_by, d.created_at, d.updated_at,
-    u.name AS created_by_name, e.name AS updated_by_name, j.title AS job_title';
+const DOC_LIST_COLS = 'd.id, d.job_id, d.engine, d.kind, d.title, d.gfile_id, d.web_url, d.is_template, d.version, d.access, d.created_by, d.created_at, d.updated_at,
+    (SELECT COUNT(*) FROM work_doc_access a WHERE a.doc_id = d.id) AS shared_count, u.name AS created_by_name, e.name AS updated_by_name, j.title AS job_title';
 
 /** The largest file the database will take in one go (MySQL's max_allowed_packet, less room for the query). */
 function doc_max_bytes(): int
@@ -27,8 +28,10 @@ function doc_max_bytes(): int
 
 function doc_row(array $r): array
 {
-    foreach (['id', 'job_id', 'is_template', 'version', 'created_by'] as $k) {
-        $r[$k] = $r[$k] === null ? null : (int)$r[$k];
+    foreach (['id', 'job_id', 'is_template', 'version', 'created_by', 'shared_count'] as $k) {
+        if (array_key_exists($k, $r)) {
+            $r[$k] = $r[$k] === null ? null : (int)$r[$k];
+        }
     }
     $r['job_ref'] = $r['job_id'] ? job_ref($r['job_id']) : null;
     return $r;
@@ -51,24 +54,54 @@ function load_doc(int $id, array $me, bool $withContent = false): array
     return doc_row($d);
 }
 
+/** What someone may do with a file: 'owner' (edit and choose who it's shared with), 'edit', 'view', or null (nothing). */
+function doc_role(array $d, array $me): ?string
+{
+    if ((int)$d['is_template'] === 1) {
+        return is_management($me) ? 'owner' : 'view';
+    }
+    if (is_management($me) || (int)$d['created_by'] === $me['id']) {
+        return 'owner';
+    }
+    $edit = q('SELECT can_edit FROM work_doc_access WHERE doc_id = ? AND user_id = ?', [(int)$d['id'], $me['id']])->fetchColumn();
+    if ($edit !== false) {
+        return (int)$edit ? 'edit' : 'view';
+    }
+    if ($d['job_id'] && ($d['access'] ?? 'job') !== 'picked') {
+        $j = q('SELECT id, created_by FROM jobs WHERE id = ?', [(int)$d['job_id']])->fetch();
+        if ($j && job_can_see($j, $me)) {
+            return 'edit';
+        }
+    }
+    return null;
+}
+
 function doc_can_see(array $d, array $me): bool
 {
-    if (is_management($me) || (int)$d['created_by'] === $me['id'] || (int)$d['is_template'] === 1) {
-        return true;
-    }
-    if ($d['job_id']) {
-        $j = q('SELECT id, created_by FROM jobs WHERE id = ?', [(int)$d['job_id']])->fetch();
-        return $j && job_can_see($j, $me);
-    }
-    return false;
+    return doc_role($d, $me) !== null;
 }
 
 function doc_can_edit(array $d, array $me): bool
 {
-    if ((int)$d['is_template'] === 1) {
-        return is_management($me);
+    return in_array(doc_role($d, $me), ['owner', 'edit'], true);
+}
+
+/** The maker and management choose who a file is shared with (not for templates: everyone can open those). */
+function doc_can_share(array $d, array $me): bool
+{
+    return (int)$d['is_template'] === 0 && doc_role($d, $me) === 'owner';
+}
+
+/** The people a file is shared with. */
+function doc_people(int $docId): array
+{
+    $rows = q('SELECT a.user_id AS id, u.name, a.can_edit FROM work_doc_access a JOIN users u ON u.id = a.user_id
+        WHERE a.doc_id = ? ORDER BY u.name', [$docId])->fetchAll();
+    foreach ($rows as &$r) {
+        $r['id'] = (int)$r['id'];
+        $r['can_edit'] = (int)$r['can_edit'];
     }
-    return doc_can_see($d, $me);
+    return $rows;
 }
 
 /** Content from the editor: JSON, within the size the database takes. */
@@ -111,11 +144,17 @@ function doc_share_google(string $fileId, array $me, ?array $job): void
     }
 }
 
-/** What the job drawer lists. */
-function job_docs(int $jobId): array
+/** What the job drawer lists: the job's files, less any kept to picked people the viewer isn't one of. */
+function job_docs(int $jobId, array $me): array
 {
+    $where = 'd.job_id = ? AND d.deleted_at IS NULL AND d.is_template = 0';
+    $params = [$jobId];
+    if (!is_management($me)) {
+        $where .= " AND (d.access <> 'picked' OR d.created_by = ? OR d.id IN (SELECT doc_id FROM work_doc_access WHERE user_id = ?))";
+        array_push($params, $me['id'], $me['id']);
+    }
     $rows = q('SELECT ' . DOC_LIST_COLS . ' FROM work_docs d LEFT JOIN users u ON u.id = d.created_by LEFT JOIN users e ON e.id = d.updated_by
-        LEFT JOIN jobs j ON j.id = d.job_id WHERE d.job_id = ? AND d.deleted_at IS NULL AND d.is_template = 0 ORDER BY d.created_at', [$jobId])->fetchAll();
+        LEFT JOIN jobs j ON j.id = d.job_id WHERE ' . $where . ' ORDER BY d.created_at', $params)->fetchAll();
     return array_map('doc_row', $rows);
 }
 
@@ -129,11 +168,20 @@ function act_docs_list(array $in, array $me): void
         $job = load_job((int)$in['job_id'], $me);
         $where[] = 'd.job_id = ?';
         $params[] = $job['id'];
+        if (!is_management($me)) {
+            $where[] = "(d.access <> 'picked' OR d.created_by = ? OR d.id IN (SELECT doc_id FROM work_doc_access WHERE user_id = ?))";
+            array_push($params, $me['id'], $me['id']);
+        }
     } elseif (!$templates) {
-        if (!is_management($me) || ($in['scope'] ?? '') === 'mine') {
-            // Staff see what they made and the files on jobs they're on.
-            $where[] = '(d.created_by = ? OR d.job_id IN (SELECT job_id FROM job_assignees WHERE user_id = ? AND removed_at IS NULL) OR d.job_id IN (SELECT id FROM jobs WHERE created_by = ?))';
-            array_push($params, $me['id'], $me['id'], $me['id']);
+        $scope = $in['scope'] ?? '';
+        if ($scope === 'shared') {
+            // Files other people shared with me.
+            $where[] = 'd.id IN (SELECT doc_id FROM work_doc_access WHERE user_id = ?)';
+            $params[] = $me['id'];
+        } elseif (!is_management($me) || $scope === 'mine') {
+            // Staff see what they made, what is shared with them, and the files on jobs they're on (unless kept to picked people).
+            $where[] = "(d.created_by = ? OR d.id IN (SELECT doc_id FROM work_doc_access WHERE user_id = ?) OR (d.access <> 'picked' AND (d.job_id IN (SELECT job_id FROM job_assignees WHERE user_id = ? AND removed_at IS NULL) OR d.job_id IN (SELECT id FROM jobs WHERE created_by = ?))))";
+            array_push($params, $me['id'], $me['id'], $me['id'], $me['id']);
         }
         if (is_management($me) && !empty($in['user_id'])) {
             $where[] = 'd.created_by = ?';
@@ -172,7 +220,10 @@ function act_doc_get(array $in, array $me): void
     // Sent as the exact text the editor saved: decoding it here would turn {"0":…} objects into lists.
     $d['content_json'] = $d['content'];
     unset($d['content']);
-    $d['can_edit'] = doc_can_edit($d, $me);
+    $d['role'] = doc_role($d, $me);
+    $d['can_edit'] = in_array($d['role'], ['owner', 'edit'], true);
+    $d['can_share'] = doc_can_share($d, $me);
+    $d['people'] = doc_people($d['id']);
     $d['can_delete'] = is_management($me) || $d['created_by'] === $me['id'];
     json_out(['ok' => true, 'doc' => $d, 'google' => gdrive_ready(), 'max_bytes' => doc_max_bytes()]);
 }
@@ -417,4 +468,93 @@ function act_doc_google_access(array $in, array $me): void
         fail('Google wouldn\'t share the file with ' . google_email_of($u) . '. Check it is a Google account.', 502);
     }
     json_out(['ok' => true, 'message' => 'Access given to ' . google_email_of($u) . '.']);
+}
+
+/** The maker or management: who a file is shared with, and the staff it could be shared with. */
+function act_doc_access_get(array $in, array $me): void
+{
+    $d = load_doc((int)($in['id'] ?? 0), $me);
+    if (!doc_can_share($d, $me)) {
+        fail('Only the person who made this file or management can choose who works on it.', 403);
+    }
+    $staff = q('SELECT id, name, role, location FROM users WHERE active = 1 AND id <> ? ORDER BY name', [$d['created_by']])->fetchAll();
+    foreach ($staff as &$s) {
+        $s['id'] = (int)$s['id'];
+    }
+    unset($s);
+    $jobPeople = [];
+    if ($d['job_id']) {
+        $job = q('SELECT id, created_by FROM jobs WHERE id = ?', [$d['job_id']])->fetch();
+        if ($job) {
+            $job['id'] = (int)$job['id'];
+            $jobPeople = array_column(doc_job_people($job, (int)$d['created_by']), 'name');
+        }
+    }
+    json_out(['ok' => true, 'access' => $d['access'] === 'picked' ? 'picked' : 'job', 'people' => doc_people($d['id']),
+        'staff' => $staff, 'job_people' => $jobPeople, 'owner' => $d['created_by_name']]);
+}
+
+/**
+ * The maker or management: set who a file is shared with. `people` is the whole list ([{user_id, can_edit}]);
+ * `access` is 'job' (everyone on its job can also edit) or 'picked' (only the people listed).
+ */
+function act_doc_access_save(array $in, array $me): void
+{
+    $d = load_doc((int)($in['id'] ?? 0), $me);
+    if (!doc_can_share($d, $me)) {
+        fail('Only the person who made this file or management can choose who works on it.', 403);
+    }
+    $access = ($in['access'] ?? '') === 'picked' && $d['job_id'] ? 'picked' : 'job';
+    $want = [];
+    foreach ((array)($in['people'] ?? []) as $p) {
+        $uid = (int)($p['user_id'] ?? 0);
+        if ($uid > 0 && $uid !== $d['created_by']) {
+            $want[$uid] = empty($p['can_edit']) ? 0 : 1;
+        }
+    }
+    if ($want) {
+        $in_ = implode(',', array_fill(0, count($want), '?'));
+        $ok = array_map('intval', q("SELECT id FROM users WHERE active = 1 AND id IN ($in_)", array_keys($want))->fetchAll(PDO::FETCH_COLUMN));
+        $want = array_intersect_key($want, array_flip($ok));
+    }
+    $before = array_column(doc_people($d['id']), 'can_edit', 'id');
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        q('UPDATE work_docs SET access = ? WHERE id = ?', [$access, $d['id']]);
+        q('DELETE FROM work_doc_access WHERE doc_id = ?', [$d['id']]);
+        foreach ($want as $uid => $edit) {
+            q('INSERT INTO work_doc_access (doc_id, user_id, can_edit, added_by, added_at) VALUES (?,?,?,?,NOW())', [$d['id'], $uid, $edit, $me['id']]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    $added = array_keys(array_diff_key($want, $before));
+    $changed = array_keys(array_filter($want, fn($edit, $uid) => isset($before[$uid]) && (int)$before[$uid] !== $edit, ARRAY_FILTER_USE_BOTH));
+    $what = DOC_KINDS[$d['kind']];
+    foreach ([1 => 'can edit', 0 => 'can view'] as $edit => $label) {
+        $ids = array_values(array_filter($added, fn($uid) => $want[$uid] === $edit));
+        if ($ids) {
+            notify($ids, 'doc', $me['name'] . ' shared a ' . $what . ' with you', '"' . $d['title'] . '" (you ' . $label . ')', 'docs/' . $d['id'], false);
+        }
+    }
+    // Google files: give the people added (or whose level changed) the matching access in Google Drive.
+    if ($d['engine'] === 'google' && $d['gfile_id'] && gdrive_ready() && gdrive_share_mode() === 'people' && ($added || $changed)) {
+        $ids = array_merge($added, $changed);
+        $in_ = implode(',', array_fill(0, count($ids), '?'));
+        foreach (q("SELECT id, email, google_email FROM users WHERE id IN ($in_)", $ids)->fetchAll() as $u) {
+            gd_share($d['gfile_id'], google_email_of($u), $want[(int)$u['id']] ? 'writer' : 'reader');
+        }
+    }
+    $removed = array_diff_key($before, $want);
+    if ($d['job_id'] && ($added || $removed || $changed || $access !== ($d['access'] ?? 'job'))) {
+        job_log($d['job_id'], 'doc', 'Changed who works on ' . $what . ' "' . $d['title'] . '"' . ($access === 'picked' ? ' (only picked people)' : ''));
+    }
+    audit('doc_access', 'work_doc', $d['id'], ['access' => $access, 'people' => $want]);
+    touch_change();
+    json_out(['ok' => true, 'people' => doc_people($d['id']), 'access' => $access]);
 }

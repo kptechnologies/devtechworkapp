@@ -554,3 +554,12 @@ a.link-chip:hover { border-color: var(--brand); color: var(--brand-text); }
   .docx-host .ql-editor { padding: 24px 18px; margin-top: 10px; }
   .sheet-host { height: calc(100dvh - 250px); }
 }
+
+/* Sheets & docs: Share dialog, one row per person with a Can edit / Can view choice */
+.share-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.share-row { display: flex; align-items: center; gap: 8px; }
+.share-row .opt { flex: 1; min-width: 0; }
+.share-row .opt span { width: 100%; }
+.share-row select { width: auto; flex: none; padding-top: 4px; padding-bottom: 4px; }
+.share-row select:disabled { opacity: .45; }
+.share-row.hide { display: none; }

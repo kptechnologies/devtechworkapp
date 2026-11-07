@@ -23,6 +23,8 @@
   const KIND = { sheet: ['Spreadsheet', 'table', 'tone-in'], doc: ['Document', 'file-text', 'tone-info'] };
   const docIcon = (d) => KIND[d.kind][1];
   const engineTag = (d) => (d.engine === 'google' ? '<span class="pill info" style="font-size:11px"><i class="ti ti-brand-google-drive"></i>Google</span>' : '');
+  const sharedTag = (d) => (d.shared_count > 0 || d.access === 'picked'
+    ? `<span class="pill" style="font-size:11px" title="${d.access === 'picked' ? 'Only picked people' : 'Shared'}"><i class="ti ti-${d.access === 'picked' ? 'lock' : 'users'}"></i>${d.shared_count || ''}</span>` : '');
   const safeName = (s) => String(s || 'file').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 120) || 'file';
   const download = (blob, name) => {
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
@@ -298,7 +300,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       <div class="li-icon ${KIND[d.kind][2]}"><i class="ti ti-${docIcon(d)}"></i></div>
       <div class="main-col"><div class="t">${esc(d.title)}</div>
         <div class="s">${KIND[d.kind][0]}${showJob && d.job_ref ? ` · ${esc(d.job_ref)} ${esc(d.job_title || '')}` : ''} · ${esc(d.created_by_name || '')} · ${d.updated_at !== d.created_at ? 'edited ' : ''}${esc(ago(d.updated_at))}</div></div>
-      ${engineTag(d)}<i class="ti ti-chevron-right faint"></i></li>`).join('')}</ul>`;
+      ${sharedTag(d)}${engineTag(d)}<i class="ti ti-chevron-right faint"></i></li>`).join('')}</ul>`;
   }
   const bindRows = (box) => $$('[data-doc]', box).forEach((li) => li.addEventListener('click', () => App.go(`docs/${li.dataset.doc}`)));
 
@@ -319,7 +321,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
   async function docsView(ctx, sheetsOnly = false) {
     const mgmt = isManagement();
     const st = sheetsOnly ? stSheets : stAll;
-    const tabs = [['all', mgmt ? 'All files' : 'My files', 'files'], ['jobs', 'On job orders', 'clipboard-list'], ['general', 'Not on a job', 'file'], ['templates', 'Templates', 'template']];
+    const tabs = [['all', mgmt ? 'All files' : 'My files', 'files'], ['shared', 'Shared with me', 'users'], ['jobs', 'On job orders', 'clipboard-list'], ['general', 'Not on a job', 'file'], ['templates', 'Templates', 'template']];
     if (mgmt) tabs.splice(1, 0, ['mine', 'Mine', 'user']);
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>${sheetsOnly ? 'Spreadsheet' : 'Sheets &amp; docs'}</h1><p class="muted">${sheetsOnly ? 'Spreadsheets for your work: materials used, measurements, costs, inventories and inspection sheets. Upload an Excel file or start a new one.'
@@ -341,9 +343,9 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       $('#dc-gmail', g)?.addEventListener('click', (e) => { e.preventDefault(); changeGoogleEmail(r.my_google_email, load); });
       const tplNew = st.tab === 'templates' && mgmt ? '<button class="btn sm" id="dc-tpl-new"><i class="ti ti-plus"></i>New template</button>' : '';
       if (!r.docs.length) {
-        box.innerHTML = `<div class="card">${App.empty(st.tab === 'templates' ? 'template' : 'files', st.tab === 'templates' ? 'No templates yet' : sheetsOnly ? 'No spreadsheets yet' : 'No files yet',
+        box.innerHTML = `<div class="card">${App.empty(st.tab === 'templates' ? 'template' : 'files', st.tab === 'templates' ? 'No templates yet' : st.tab === 'shared' ? 'Nothing shared with you yet' : sheetsOnly ? 'No spreadsheets yet' : 'No files yet',
           st.tab === 'templates' ? (mgmt ? 'Make a template (for example a materials-used sheet) so staff can start from it.' : 'Management hasn\'t made any templates yet.')
-            : sheetsOnly ? 'Make a spreadsheet, or open a job order and add one there.' : 'Make a spreadsheet or document, or open a job order and add one there.', tplNew)}</div>`;
+            : st.tab === 'shared' ? 'When someone lets you work on one of their files, it shows here.' : sheetsOnly ? 'Make a spreadsheet, or open a job order and add one there.' : 'Make a spreadsheet or document, or open a job order and add one there.', tplNew)}</div>`;
       } else {
         box.innerHTML = `${tplNew ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${tplNew}</div>` : ''}<div class="card">${docRows(r.docs)}</div>`;
       }
@@ -377,6 +379,53 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
     });
   }
 
+  /* ----------------------------------------------------------- share */
+  /** "· Shared with Ada, Ben (view)" under the file name. */
+  function sharedLine(d) {
+    if (d.is_template) return '';
+    const p = d.people || [];
+    const names = p.slice(0, 3).map((x) => `${esc(x.name.split(' ')[0])}${x.can_edit ? '' : ' (view)'}`).join(', ') + (p.length > 3 ? ` +${p.length - 3}` : '');
+    const lock = d.access === 'picked' && d.job_id ? ' <i class="ti ti-lock" title="Only picked people"></i>' : '';
+    return p.length ? ` · <i class="ti ti-users"></i> ${names}${lock}` : lock ? ` ·${lock} Only picked people` : '';
+  }
+
+  /** The maker or management: choose who can edit or view a file. */
+  async function shareDoc(d, done) {
+    const r = await api('doc_access_get', { query: { id: d.id } });
+    const level = new Map(r.people.map((p) => [p.id, p.can_edit ? 'edit' : 'view']));
+    const onJob = !!d.job_id;
+    const tick = '<i class="ti ti-check" style="font-size:14px"></i>';
+    const el = App.modal(`Share "${esc(d.title)}"`, `
+      ${onJob ? `<div class="field"><div class="label">Who on ${esc(d.job_ref)} can work on it?</div><div class="opts col">
+        <label class="opt"><input type="radio" name="sh-access" value="job" ${r.access !== 'picked' ? 'checked' : ''}><span>${tick}Everyone on the job can edit${r.job_people.length ? ` <span class="faint small">· ${esc(r.job_people.join(', '))}</span>` : ''}</span></label>
+        <label class="opt"><input type="radio" name="sh-access" value="picked" ${r.access === 'picked' ? 'checked' : ''}><span>${tick}Only the people I pick below</span></label></div></div>` : ''}
+      <p class="muted" style="margin-bottom:10px">${esc(r.owner || 'The owner')} and management can always open and edit it. Tick the people who should work on it too, and choose whether they can edit or only view.</p>
+      <input type="search" id="sh-q" placeholder="Search staff…" style="margin-bottom:10px">
+      <div class="share-list" id="sh-list">${r.staff.map((s) => `<div class="share-row" data-name="${esc(s.name.toLowerCase())}">
+        <label class="opt"><input type="checkbox" value="${s.id}" ${level.has(s.id) ? 'checked' : ''}><span>${tick}${esc(s.name)}${s.location ? ` <span class="faint small">· ${esc(s.location)}</span>` : ''}</span></label>
+        <select data-level="${s.id}" aria-label="Access for ${esc(s.name)}" ${level.has(s.id) ? '' : 'disabled'}>
+          <option value="edit" ${level.get(s.id) !== 'view' ? 'selected' : ''}>Can edit</option><option value="view" ${level.get(s.id) === 'view' ? 'selected' : ''}>Can view</option></select></div>`).join('')
+        || '<p class="muted small">No other active staff.</p>'}</div>
+      ${d.engine === 'google' ? `<p class="small faint" style="margin-top:10px"><i class="ti ti-brand-google-drive"></i> People you add also get access in Google Drive. Taking someone off here doesn't remove their Google access.</p>` : ''}`,
+    '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="sh-ok">Save</button>');
+    $('#sh-q', el).addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      $$('#sh-list .share-row', el).forEach((o) => o.classList.toggle('hide', !!q && !o.dataset.name.includes(q)));
+    });
+    $$('#sh-list input[type=checkbox]', el).forEach((c) => c.addEventListener('change', () => { $(`[data-level="${c.value}"]`, el).disabled = !c.checked; }));
+    $('#sh-ok', el).addEventListener('click', async (e) => {
+      const people = $$('#sh-list input[type=checkbox]:checked', el).map((c) => ({ user_id: +c.value, can_edit: $(`[data-level="${c.value}"]`, el).value === 'edit' ? 1 : 0 }));
+      const access = onJob ? ($('input[name="sh-access"]:checked', el)?.value || 'job') : 'job';
+      if (access === 'picked' && !people.length && !(await App.confirm('Nobody picked', `Only ${esc(r.owner || 'the owner')} and management will be able to open this file. Continue?`, { ok: 'Save' }))) return;
+      try {
+        await App.busy(e.currentTarget, () => api('doc_access_save', { data: { id: d.id, access, people } }));
+        App.closeTop();
+        toast('Access saved');
+        done && done();
+      } catch (err) { App.fail(err); }
+    });
+  }
+
   /* ---------------------------------------------------------- editor */
   async function docView(ctx) {
     const id = +ctx.params.id;
@@ -392,7 +441,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
         <a class="icon-btn" href="#/${back}" title="Back" aria-label="Back"><i class="ti ti-arrow-left"></i></a>
         <div class="li-icon ${KIND[d.kind][2]}" style="width:32px;height:32px"><i class="ti ti-${docIcon(d)}"></i></div>
         <div class="doc-name"><input id="dv-title" value="${esc(d.title)}" maxlength="190" ${d.can_edit ? '' : 'readonly'} aria-label="File name">
-          <div class="small faint">${crumbs} · ${esc(d.created_by_name || '')}${d.updated_by_name ? ` · last edit by ${esc(d.updated_by_name)} ${esc(ago(d.updated_at))}` : ''}</div></div>
+          <div class="small faint">${crumbs} · ${esc(d.created_by_name || '')}${d.updated_by_name ? ` · last edit by ${esc(d.updated_by_name)} ${esc(ago(d.updated_at))}` : ''}${sharedLine(d)}</div></div>
         <span class="small faint" id="dv-state">${d.can_edit ? '' : '<i class="ti ti-eye"></i> View only'}</span>
         <div class="doc-actions" id="dv-actions"></div>
       </div>
@@ -439,12 +488,20 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       }
     };
 
+    // Share: the maker and management choose who can work on the file.
+    const addShare = () => {
+      if (!d.can_share) return;
+      actions.insertAdjacentHTML('afterbegin', '<button class="btn sm ghost" id="dv-share" title="Choose who can work on this file"><i class="ti ti-users"></i>Share</button>');
+      $('#dv-share', actions).addEventListener('click', () => shareDoc(d, () => { dirty = false; App.reroute(); }).catch(App.fail));
+    };
+
     /* ---- Google file: shown in a frame, with a button to open it in Google */
     if (d.engine === 'google') {
       const url = googleEditUrl(d);
       actions.innerHTML = `<button class="btn sm ghost" id="dv-access" title="Share this file with your Google account again"><i class="ti ti-key"></i>Give me access</button>
         <a class="btn sm primary" href="${esc(url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open in Google</a>`;
       const m = menu(common);
+      addShare();
       $$('[data-m]', m).forEach((b) => b.addEventListener('click', () => onCommon(b.dataset.m, b)));
       $('#dv-access', actions).addEventListener('click', async (e) => {
         try { const x = await App.busy(e.currentTarget, () => api('doc_google_access', { data: { id } })); toast(x.message); $('iframe', area)?.setAttribute('src', url); } catch (err) { App.fail(err); }
@@ -532,6 +589,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
       actions.innerHTML = `<button class="btn sm ghost" id="dv-xlsx"><i class="ti ti-file-spreadsheet"></i>Download Excel</button>`;
       const m = menu([['csv', 'file-type-csv', 'Download CSV (current tab)'], d.can_edit ? ['import', 'upload', 'Replace with an Excel file'] : null,
         d.can_edit && r.google ? ['google', 'brand-google-drive', 'Copy to Google Drive'] : null, ...common]);
+      addShare();
       $('#dv-xlsx', actions).addEventListener('click', async (e) => {
         try { await App.busy(e.currentTarget, async () => download(await xlsxBlob(), safeName(d.title) + '.xlsx')); } catch (err) { App.fail(err); }
       });
@@ -592,6 +650,7 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #999;padding:4
             .map(([k, i, l]) => `<button class="menu-item" data-t="${k}"><i class="ti ti-${i}"></i>${l}</button>`).join('')}</div></div>` : ''}
         <button class="btn sm ghost" id="dv-word"><i class="ti ti-file-word"></i>Download Word</button>`;
       const m = menu([['print', 'printer', 'Print or save as PDF'], d.can_edit && r.google ? ['google', 'brand-google-drive', 'Copy to Google Drive'] : null, ...common]);
+      addShare();
       $('#dv-word', actions).addEventListener('click', async () => download(await docBlob(), safeName(d.title) + '.doc'));
       if ($('#dv-tbl', actions)) {
         const tm = $('#dv-tbl-menu', actions);
