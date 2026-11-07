@@ -575,7 +575,15 @@
     box.innerHTML = `<h3 style="margin-bottom:4px">Sheets &amp; docs: company Google Drive</h3>
       <p class="muted small" style="margin-bottom:12px">Staff can always use the built-in spreadsheet and document editor. Connect a company Google account to also let them make
         Google Sheets and Docs: every file is created in that account's Drive (in a folder per job) and stays there, even when staff leave.</p>
-      ${!g.client_ready ? `<div class="note-box warn">First fill in the Google <b>Client ID</b> and <b>secret</b> above and save. In Google Cloud Console, also turn on the <b>Google Drive API</b> for the same project.</div>`
+      ${!g.client_ready ? `<form id="gd-client">
+          <p class="small" style="margin-bottom:10px"><b>Step 1.</b> In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → Credentials</a>, create an
+            <b>OAuth client ID</b> (type <b>Web application</b>) and add the redirect URI below. Under <b>APIs &amp; Services → Library</b>, turn on the <b>Google Drive API</b>.</p>
+          <div class="field"><label>Authorised redirect URI</label><input readonly value="${esc(g.redirect_uri)}" onclick="this.select()"><div class="help">Paste this into the OAuth client exactly.</div></div>
+          <p class="small" style="margin-bottom:10px"><b>Step 2.</b> Paste the client's ID and secret here and save. Then a <b>Connect Google Drive</b> button appears.</p>
+          <div class="field"><label for="gd-cid">Client ID</label><input id="gd-cid" name="client_id" value="${esc(g.client_id)}" autocomplete="off" placeholder="…apps.googleusercontent.com" required></div>
+          <div class="field"><label for="gd-csec">Client secret</label><input type="password" id="gd-csec" name="client_secret" autocomplete="new-password" required></div>
+          <div class="help" style="margin-bottom:10px">This is the same Google client as Google Tasks under Phone alerts, so it's saved there too.</div>
+          <button class="btn primary" type="submit">Save and continue</button></form>`
         : g.connected ? `<div class="note-box ${g.broken ? 'bad' : ''}" style="margin-bottom:12px"><i class="ti ti-brand-google-drive"></i> Connected to <b>${esc(g.email || 'Google')}</b>${g.connected_at ? ` since ${esc(App.fmtDate(g.connected_at))}` : ''} · ${g.docs} Google file${g.docs === 1 ? '' : 's'}
             ${g.broken ? '<br>Google stopped accepting this connection. Connect it again.' : ''}</div>
           <form id="gd-form"><div class="form-row"><div class="field"><label for="gd-share">Who can open the Google files</label><select id="gd-share" name="share">
@@ -583,9 +591,23 @@
               <div class="help">"Only the staff" is safer but each staff member needs a Google account. "Anyone with the link" works without one.</div></div>
             <div class="field"><label for="gd-eng">Default editor for new files</label><select id="gd-eng" name="default_engine">${App.opts([['builtin', 'Built-in editor'], ['google', 'Google Sheets / Docs']], g.default_engine)}</select></div></div>
           <div class="actions"><button class="btn ghost" type="button" id="gd-off">Disconnect</button><a class="btn" href="google.php?start=1&amp;drive=1">Connect a different account</a><button class="btn primary" type="submit">Save</button></div></form>`
-        : `<p class="small" style="margin-bottom:12px">Sign in with the company Google account (for example <i>reports@yourcompany.com</i>) that should own all the files. Use the same OAuth client as above, with the <b>Google Drive API</b> turned on.
+        : `<p class="small" style="margin-bottom:12px">Sign in with the company Google account (for example <i>reports@yourcompany.com</i>) that should own all the files. The <b>Google Drive API</b> must be turned on for the Google client.
             If the OAuth app is in "Testing", add that account as a test user.</p>
           <a class="btn primary" href="google.php?start=1&amp;drive=1"><i class="ti ti-brand-google-drive"></i>Connect Google Drive</a>`}`;
+    $('#gd-client', box)?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = App.formData(e.target);
+      if (!d.client_id.trim() || !d.client_secret.trim()) { App.toast('Paste both the Client ID and the Client secret.', true); return; }
+      try {
+        await App.busy(e.submitter, () => App.api('settings_save', { data: { google: d } }));
+        App.toast('Google client saved. Now connect Google Drive.');
+        const tasksId = $('#se-gid');
+        if (tasksId) tasksId.value = d.client_id;
+        const tasksSec = $('#se-gsec');
+        if (tasksSec) tasksSec.value = '••••••••';
+        gdriveCard(box);
+      } catch (err) { App.fail(err); }
+    });
     $('#gd-form', box)?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try { await App.busy(e.submitter, () => App.api('gdrive_settings', { data: App.formData(e.target) })); App.toast('Google Drive settings saved'); } catch (err) { App.fail(err); }

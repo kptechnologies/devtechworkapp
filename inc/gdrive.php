@@ -197,6 +197,8 @@ function act_gdrive_status(array $in, array $me): void
     $g = gdrive_cfg();
     json_out(['ok' => true, 'gdrive' => [
         'client_ready' => google_ready(),
+        'client_id' => is_admin($me) ? (google_cfg()['client_id'] ?? '') : '',
+        'redirect_uri' => is_admin($me) ? google_redirect_uri() : '',
         'connected' => gdrive_ready(),
         'email' => $g['email'] ?? '',
         'connected_at' => $g['connected_at'] ?? null,
