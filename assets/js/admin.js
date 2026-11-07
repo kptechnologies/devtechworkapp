@@ -406,6 +406,8 @@
           <div class="field"><label for="se-gid">Client ID</label><input id="se-gid" name="client_id" value="${esc(s.google.client_id)}" autocomplete="off" placeholder="…apps.googleusercontent.com"></div>
           <div class="field"><label for="se-gsec">Client secret</label><input type="password" id="se-gsec" name="client_secret" value="${esc(s.google.client_secret)}" autocomplete="new-password"></div>
           <button class="btn primary" type="submit">Save Google settings</button></form>
+        <div class="card card-pad" id="se-gdrive"><h3 style="margin-bottom:4px">Sheets &amp; docs: company Google Drive</h3>
+          <p class="muted small">Loading…</p></div>
         <form class="card card-pad" id="se-att"><h3 style="margin-bottom:4px">Attendance</h3>
           <p class="muted small" style="margin-bottom:14px">Staff clock in and out on their phone with a selfie and a fresh GPS reading. Phones only share location on HTTPS.
             School GPS points are set on each <a href="#/clients">client</a>.</p>
@@ -535,6 +537,7 @@
       e.preventDefault();
       try { await App.busy(e.submitter, () => api('settings_save', { data: { smtp: App.formData(e.target) } })); toast('Email settings saved'); } catch (err) { App.fail(err); }
     });
+    gdriveCard($('#se-gdrive', ctx.el));
     $('#se-google', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
       try { await App.busy(e.submitter, () => api('settings_save', { data: { google: App.formData(e.target) } })); toast('Google settings saved'); } catch (err) { App.fail(err); }
@@ -557,4 +560,39 @@
   }, { title: 'Settings', admin: true });
 
   App.start();
+  /** Settings card: connect the company Google account that owns every Google Sheet and Doc made from the portal. */
+  async function gdriveCard(box) {
+    const flag = (location.hash.split('?')[1] || '').match(/gdrive=(\w+)/)?.[1];
+    if (flag) {
+      const msg = { linked: ['Google Drive connected', false], cancelled: ['Google Drive was not connected', true], failed: ['Google Drive couldn\'t be connected. Try again.', true],
+        noscope: ['Tick the Google Drive box on Google\'s screen to connect it.', true], denied: ['Only an admin can connect Google Drive.', true] }[flag];
+      if (msg) App.toast(msg[0], msg[1]);
+      history.replaceState(null, '', location.hash.split('?')[0]);
+    }
+    let g;
+    try { g = (await App.api('gdrive_status')).gdrive; } catch (e) { box.innerHTML = ''; return; }
+    const esc = App.esc;
+    box.innerHTML = `<h3 style="margin-bottom:4px">Sheets &amp; docs: company Google Drive</h3>
+      <p class="muted small" style="margin-bottom:12px">Staff can always use the built-in spreadsheet and document editor. Connect a company Google account to also let them make
+        Google Sheets and Docs: every file is created in that account's Drive (in a folder per job) and stays there, even when staff leave.</p>
+      ${!g.client_ready ? `<div class="note-box warn">First fill in the Google <b>Client ID</b> and <b>secret</b> above and save. In Google Cloud Console, also turn on the <b>Google Drive API</b> for the same project.</div>`
+        : g.connected ? `<div class="note-box ${g.broken ? 'bad' : ''}" style="margin-bottom:12px"><i class="ti ti-brand-google-drive"></i> Connected to <b>${esc(g.email || 'Google')}</b>${g.connected_at ? ` since ${esc(App.fmtDate(g.connected_at))}` : ''} · ${g.docs} Google file${g.docs === 1 ? '' : 's'}
+            ${g.broken ? '<br>Google stopped accepting this connection. Connect it again.' : ''}</div>
+          <form id="gd-form"><div class="form-row"><div class="field"><label for="gd-share">Who can open the Google files</label><select id="gd-share" name="share">
+              ${App.opts([['people', 'Only the staff on the file (by their Google email)'], ['link', 'Anyone with the link can edit']], g.share)}</select>
+              <div class="help">"Only the staff" is safer but each staff member needs a Google account. "Anyone with the link" works without one.</div></div>
+            <div class="field"><label for="gd-eng">Default editor for new files</label><select id="gd-eng" name="default_engine">${App.opts([['builtin', 'Built-in editor'], ['google', 'Google Sheets / Docs']], g.default_engine)}</select></div></div>
+          <div class="actions"><button class="btn ghost" type="button" id="gd-off">Disconnect</button><a class="btn" href="google.php?start=1&amp;drive=1">Connect a different account</a><button class="btn primary" type="submit">Save</button></div></form>`
+        : `<p class="small" style="margin-bottom:12px">Sign in with the company Google account (for example <i>reports@yourcompany.com</i>) that should own all the files. Use the same OAuth client as above, with the <b>Google Drive API</b> turned on.
+            If the OAuth app is in "Testing", add that account as a test user.</p>
+          <a class="btn primary" href="google.php?start=1&amp;drive=1"><i class="ti ti-brand-google-drive"></i>Connect Google Drive</a>`}`;
+    $('#gd-form', box)?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await App.busy(e.submitter, () => App.api('gdrive_settings', { data: App.formData(e.target) })); App.toast('Google Drive settings saved'); } catch (err) { App.fail(err); }
+    });
+    $('#gd-off', box)?.addEventListener('click', async (e) => {
+      if (!(await App.confirm('Disconnect Google Drive?', 'Files already made stay in the Google account. Staff can\'t make new Google files until you connect again.', { ok: 'Disconnect', danger: true }))) return;
+      try { await App.busy(e.currentTarget, () => App.api('gdrive_disconnect', { data: {} })); gdriveCard(box); } catch (err) { App.fail(err); }
+    });
+  }
 })();
