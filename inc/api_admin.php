@@ -228,6 +228,9 @@ function act_settings_get(array $in, array $me): void
         'fault_types' => fault_types(),
         'require_signoff' => setting('require_signoff') !== false,
         'pay_rules' => pay_rules(),
+        'portal_visibility' => portal_visibility_company(),
+        'visibility_categories' => statement_categories(),
+        'weekly_report_time' => hhmm_setting('weekly_report_time', '07:00'),
         'reminders' => reminder_settings() + ['cron_key' => cron_key(), 'cron_path' => dirname(__DIR__) . '/cron.php', 'mail_enabled' => mail_enabled(), 'last_run' => setting('_rem_digest')],
         'due_reminders' => due_reminder_settings() + ['choices' => DUE_REMIND_CHOICES],
         'smtp' => $smtp,
@@ -266,7 +269,10 @@ function act_settings_save(array $in, array $me): void
     if (isset($in['company_address'])) {
         save_setting('company_address', str_in($in['company_address'], 300));
     }
-    foreach (['work_start' => 'work start time', 'work_end' => 'closing time', 'reminder_time' => 'reminder time'] as $k => $label) {
+    if (isset($in['portal_visibility']) && is_array($in['portal_visibility'])) {
+        save_setting('portal_visibility', visibility_clean($in['portal_visibility']));
+    }
+    foreach (['work_start' => 'work start time', 'work_end' => 'closing time', 'reminder_time' => 'reminder time', 'weekly_report_time' => 'weekly report time'] as $k => $label) {
         if (isset($in[$k])) {
             if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string)$in[$k])) {
                 fail("Enter the $label as HH:MM.");
@@ -340,7 +346,7 @@ function act_settings_save(array $in, array $me): void
                 if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string)$v)) {
                     fail('Enter the report deadline as HH:MM.');
                 }
-            } elseif ($k === 'effective_from') {
+            } elseif (in_array($k, ['effective_from', 'discipline_from'], true)) {
                 if (!valid_date((string)$v)) {
                     fail('Enter the date the pay rules start from.');
                 }

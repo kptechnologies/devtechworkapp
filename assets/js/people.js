@@ -285,6 +285,7 @@
         toast(isIn ? `Clocked in at ${r.record.location_label || 'work'}, ${timeOf(r.record.in_at)}` : `Clocked out at ${timeOf(r.record.out_at)}`);
         onDone && onDone();
         if (isIn) App.pendingJobsPopup();
+        if (isIn) App.maybeShowWeekly?.();
       } catch (err) {
         if (err.code === 'jobs_due' || err.code === 'jobs_due_here') { if (err.code === 'jobs_due') dueItems = err.data?.items || dueItems; else refreshDue(); doneKeys.clear(); drawDue(); App.showErrors(form, { checklist: err.message }); return; }
         if (err.code === 'stale_gps' && attempt < 2) return send(btn, attempt + 1); // cached fix: try once more
@@ -919,6 +920,7 @@
           ${p.wallet ? `<div class="card kpi"><div class="kpi-icon tone-in"><i class="ti ti-wallet"></i></div><div class="label">Wallet balance</div><div class="value">${money(p.wallet.balance)}</div><div class="sub">${p.tools.length} tool${p.tools.length === 1 ? '' : 's'} held</div></div>`
             : `<div class="card kpi"><div class="kpi-icon tone-brand"><i class="ti ti-tools"></i></div><div class="label">Tools held</div><div class="value">${p.tools.length}</div><div class="sub">Issued to them</div></div>`}
         </div>
+        ${admin && !self && u.role !== 'admin' ? '<div id="pf-vis" style="margin-bottom:14px"></div>' : ''}
         <div class="seg scroll" id="pf-tabs" style="margin-bottom:12px">${PTABS.filter(([k]) => k !== 'wallet' || p.wallet).map(([k, l, i]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}"><i class="ti ti-${i}"></i> ${l}${k === 'queries' && p.queries.length ? ` <span class="pill ${p.queries.some((x) => ['open', 'replied'].includes(x.status)) ? 'bad' : ''}" style="padding:0 6px">${p.queries.length}</span>` : ''}</button>`).join('')}</div>
         <div id="pf-body"></div>`;
       const body = $('#pf-body', ctx.el);
@@ -930,6 +932,7 @@
       $$('#pf-tabs button', ctx.el).forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; App.store.set('dt-ptab', tab); draw(); }));
       $('#pf-out', ctx.el)?.addEventListener('click', App.logout);
       App.renderAlertsCard?.($('#pf-alerts', ctx.el));
+      if ($('#pf-vis', ctx.el)) App.renderStaffVisibility?.($('#pf-vis', ctx.el), u.id);
       $('#pf-account', ctx.el)?.addEventListener('click', async () => {
         const acct = (await api('users_list')).items.find((x) => x.id === u.id);
         App.editUser?.(acct, load);

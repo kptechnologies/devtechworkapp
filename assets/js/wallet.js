@@ -36,6 +36,7 @@
         <div class="grid g-main">
           <div class="stack">
             <div id="home-notices"></div>
+            <div id="home-weekly"></div>
             <div id="home-push"></div>
             <div id="home-clock"></div>
             ${heroHtml(r.wallet)}
@@ -70,6 +71,7 @@
         else App.go('report/new');
       }));
       App.renderNotices?.($('#home-notices', ctx.el));
+      App.renderWeeklyCard?.($('#home-weekly', ctx.el));
       App.renderPushPrompt?.($('#home-push', ctx.el));
       App.renderClockCard?.($('#home-clock', ctx.el));
       App.renderMyJobs?.($('#home-jobs', ctx.el));
