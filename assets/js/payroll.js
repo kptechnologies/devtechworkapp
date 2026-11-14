@@ -21,9 +21,10 @@
     const btn = (kind, on, label, icon) => `<button class="btn sm ${on ? 'primary' : 'ghost'}" data-mark="${kind}" data-on="${on ? 0 : 1}"><i class="ti ti-${icon}"></i>${label}</button>`;
     const days = c.days.map((d) => {
       const has = (k) => (d.marks || []).includes(k);
+      const waiveBtn = (i) => (editable && c.can_waive && i.charge_id ? ` <button class="btn sm ghost" data-charge="${i.charge_id}" data-waive="${i.waived ? 0 : 1}" style="padding:0 6px">${i.waived ? 'Restore' : 'Waive'}</button>` : '');
       const items = d.items.map((i) => `<div style="display:flex;justify-content:space-between;gap:10px">
-        <span>${esc(i.label)}${i.waived ? ` <span class="pill in" title="${esc(i.waived)}">Waived</span><div class="faint small">${esc(i.waived)}</div>` : ''}${i.note ? `<div class="faint small">${esc(i.note)}</div>` : ''}</span>
-        <span class="num ${i.amount < 0 ? 'bad' : 'faint'}" style="white-space:nowrap">${i.waived ? `<s>${money(-i.charge)}</s>` : money(i.amount)}</span></div>`).join('');
+        <span>${esc(i.label)}${i.charge_id ? ' <span class="pill out">Rule</span>' : ''}${i.waived ? ` <span class="pill in" title="${esc(i.waived)}">Waived</span><div class="faint small">${esc(i.waived)}</div>` : ''}${i.note ? `<div class="faint small">${esc(i.note)}</div>` : ''}</span>
+        <span class="num ${i.amount < 0 ? 'bad' : 'faint'}" style="white-space:nowrap">${i.waived ? `<s>${money(-i.charge)}</s>` : money(i.amount)}${waiveBtn(i)}</span></div>`).join('');
       const ot = d.overtime ? `<div style="display:flex;justify-content:space-between;gap:10px"><span>Worked late, out ${esc(timeOf(d.overtime.out_at))} <span class="pill ${OT_PILL[d.overtime.state][1]}">${OT_PILL[d.overtime.state][0]}</span></span>
         <span class="num ${d.overtime.amount ? 'in' : 'faint'}">${money(d.overtime.amount, { sign: true })}</span></div>` : '';
       const codes = d.items.map((i) => i.code);
@@ -45,6 +46,7 @@
           <span>Lateness (${c.counts.late} day${c.counts.late === 1 ? '' : 's'})</span><span class="bad">${money(-c.totals.late)}</span>
           <span>Absences (${c.counts.absence})</span><span class="bad">${money(-c.totals.absence)}</span>
           <span>Missed / late daily reports (${c.counts.report})</span><span class="bad">${money(-c.totals.report)}</span>
+          <span>Rule breaks: clock-out, GPS, sign-off, overdue, returned (${c.counts.conduct || 0})</span><span class="bad">${money(-((c.totals && c.totals.conduct) || 0))}</span>
           <span>Overtime (${c.counts.overtime} day${c.counts.overtime === 1 ? '' : 's'})${c.counts.overtime_pending ? ` <span class="pill info">${c.counts.overtime_pending} awaiting approval</span>` : ''}</span><span class="in">${money(c.overtime, { sign: true })}</span>
           <span>Adjustments</span><span class="${c.adjustments_total < 0 ? 'bad' : ''}">${money(c.adjustments_total, { sign: true })}</span>
           <span>Salary advances (${c.advances.length})</span><span class="${c.advances_total ? 'bad' : ''}">${money(-c.advances_total)}</span>
@@ -88,6 +90,7 @@
         ${kpi('Late', n.late, plural(n.late, 'day', 'days'), 'clock-exclamation', n.late ? 'tone-bad' : 'tone-in')}
         ${kpi('Absent', n.absence, 'Without approval', 'calendar-x', n.absence ? 'tone-bad' : 'tone-in')}
         ${kpi('Daily reports', n.report, 'Missed or late', 'file-alert', n.report ? 'tone-bad' : 'tone-in')}
+        ${kpi('Rule breaks', n.conduct || 0, 'Clock-out, GPS, sign-off, tasks', 'alert-octagon', n.conduct ? 'tone-bad' : 'tone-in')}
         ${kpi('Overtime', n.overtime, n.overtime_pending ? `${n.overtime_pending} awaiting approval` : 'Approved days', 'clock-plus', 'tone-info')}</div>
       ${c.locked ? `<div class="note-box small" style="margin-bottom:14px"><i class="ti ti-lock"></i> Finalised on ${esc(fmtDate(c.locked_at))}.</div>` : ''}
       ${c.rules_from > c.month + '-01' ? `<div class="faint small" style="margin-bottom:10px">Counted from ${esc(fmtDate(c.rules_from, false))}.</div>` : ''}
@@ -137,6 +140,15 @@
           if (note === null) return;
         }
         try { await App.busy(b, () => api('payroll_mark', { data: { user_id: uid, date, kind, on, note } })); await changed(); } catch (err) { App.fail(err); }
+      }));
+      $$('[data-charge]', body).forEach((b) => b.addEventListener('click', async () => {
+        const waive = b.dataset.waive === '1';
+        let note = '';
+        if (waive) {
+          note = await App.confirm('Waive deduction', 'The staff member will be told it was waived.', { ok: 'Waive', input: { label: 'Why', required: true, placeholder: 'e.g. Phone GPS was faulty; confirmed by supervisor', requiredMsg: 'Say why.' } });
+          if (note === null) return;
+        }
+        try { await App.busy(b, () => api('pay_charge_waive', { data: { id: +b.dataset.charge, waive, note } })); toast(waive ? 'Waived' : 'Restored'); await changed(); } catch (err) { App.fail(err); }
       }));
       $$('[data-adj-del]', body).forEach((b) => b.addEventListener('click', async () => {
         if (!(await App.confirm('Remove adjustment', 'Remove this charge or bonus?', { ok: 'Remove', danger: true }))) return;
@@ -205,12 +217,12 @@
             <td class="num">${esc(timeOf(p.out_at))}</td><td class="r num">${money(r.rules.overtime)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
         <div class="grid g4" style="margin-bottom:14px">
           ${kpi('Total salaries', money(sum('salary'), { short: true }), noSalary ? `${noSalary} staff with no salary set` : `${r.rows.length} staff`, 'users', noSalary ? 'tone-out' : 'tone-brand')}
-          ${kpi('Deductions', money(sum('deductions'), { short: true }), sum('advances') ? `+ ${money(sum('advances'), { short: true })} in advances` : 'Lateness, absence, reports', 'arrow-down-right', 'tone-bad')}
+          ${kpi('Deductions', money(sum('deductions'), { short: true }), sum('advances') ? `+ ${money(sum('advances'), { short: true })} in advances` : 'Lateness, absence, reports, rule breaks', 'arrow-down-right', 'tone-bad')}
           ${kpi('Overtime', money(sum('overtime'), { short: true }), `${r.pending.length} awaiting approval`, 'clock-plus', 'tone-in')}
           ${kpi('Net payroll', money(sum('net'), { short: true }), monthLabel(month), 'cash', 'tone-info')}</div>
         <div class="card">${r.rows.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Staff</th><th class="r">Salary</th><th class="r">Deductions</th><th class="r hide-sm">Overtime</th><th class="r hide-sm">Adjustments</th><th class="r hide-sm">Advances</th><th class="r">Net pay</th><th></th></tr></thead><tbody>
           ${r.rows.map((x) => `<tr class="click" data-u="${x.id}"><td><div style="font-weight:500">${esc(x.name)}</div>
-              <div class="faint small">${[x.counts.late && `${x.counts.late} late`, x.counts.absence && `${x.counts.absence} absent`, x.counts.report && `${x.counts.report} report`].filter(Boolean).join(' · ') || 'No charges'}</div></td>
+              <div class="faint small">${[x.counts.late && `${x.counts.late} late`, x.counts.absence && `${x.counts.absence} absent`, x.counts.report && `${x.counts.report} report`, x.counts.conduct && `${x.counts.conduct} rule break${x.counts.conduct === 1 ? '' : 's'}`].filter(Boolean).join(' · ') || 'No charges'}</div></td>
             <td class="r num">${x.salary ? money(x.salary) : '<span class="pill out">Not set</span>'}</td><td class="r num ${x.deductions ? 'bad' : ''}">${money(-x.deductions)}</td>
             <td class="r num hide-sm">${money(x.overtime, { sign: true })}${x.counts.overtime_pending ? ` <span class="pill info" title="Awaiting approval">+${x.counts.overtime_pending}</span>` : ''}</td>
             <td class="r num hide-sm">${money(x.adjustments, { sign: true })}</td><td class="r num hide-sm ${x.advances ? 'bad' : ''}">${money(-x.advances)}</td><td class="r num"><b class="${x.net < 0 ? 'bad' : ''}">${money(x.net)}</b></td>
@@ -257,12 +269,14 @@
   App.route('my-pay', async (ctx) => {
     let month = App.cfg.today.slice(0, 7);
     ctx.el.innerHTML = `
-      <div class="page-head"><div><h1>My pay</h1><p class="muted">Your salary, advances and attendance record for the month.</p></div></div>
+      <div class="page-head"><div><h1>My pay</h1><p class="muted">Your salary, advances and attendance record for the month.</p></div>
+        <div class="actions" id="mp-actions"></div></div>
       <div class="filters" id="mp-filters">${monthPicker(month)}</div>
       <div id="mp-body">${App.loading()}</div>`;
     const load = async () => {
       const c = await api('payroll_detail', { query: { month } });
       const r = c.rules;
+      $('#mp-actions', ctx.el).innerHTML = c.statement ? '<a class="btn" href="#/my-statement"><i class="ti ti-file-invoice"></i>My deductions</a>' : '';
       const pay = c.published
         ? `<div class="note-box small" style="margin-bottom:14px"><i class="ti ti-circle-check"></i> Your ${esc(monthLabel(c.month))} pay was published on ${esc(fmtDate(c.published_at))}. These figures are final.</div>` + breakdownHtml(c, false)
         : (c.salary || c.advances.length ? payCardHtml(c) : '') + recordHtml(c);
@@ -272,6 +286,10 @@
           <li>Absent: a working day with no clock-in and no approval.</li>
           <li>Daily report: send it by ${esc(r.report_deadline)} each working day.</li>
           <li>Overtime: clocking out ${r.overtime_min}+ minutes after ${esc(App.cfg.work_end)}, once your admin approves it.</li>
+          <li>Clock out every time you leave a site. A visit with no clock-out is a deduction.</li>
+          <li>Keep location (GPS) on when you clock in or out. Clocking without GPS is a deduction, even with a reason.</li>
+          <li>Get the client's signature when you complete a job, and finish job order items by their due time (or ask for more time first).</li>
+          <li>A job sent back for rework is a deduction for everyone on it.</li>
           <li>Get permission in advance to report late or be absent; approved days are excused.</li></ul></details>`;
     };
     $('#mp-filters', ctx.el).addEventListener('change', (e) => {

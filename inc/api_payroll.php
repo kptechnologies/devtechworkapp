@@ -22,6 +22,9 @@ function pay_rule_defaults(): array
         'job_failure' => 3000,
         'overtime' => 1500, 'overtime_min' => 30,
         'effective_from' => '2026-10-09',
+        // Automatic deductions (inc/discipline.php); 0 turns a rule off. Nothing before discipline_from is charged.
+        'missed_clockout' => 3000, 'no_gps' => 1500, 'signoff_skipped' => 2000, 'task_overdue' => 1500, 'job_returned' => 3000,
+        'discipline_from' => (string)(setting('_discipline_from') ?: today()),
     ];
 }
 
@@ -130,8 +133,8 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
     }
 
     $days = [];
-    $totals = ['late' => 0, 'absence' => 0, 'report' => 0, 'overtime' => 0];
-    $counts = ['late' => 0, 'absence' => 0, 'report' => 0, 'overtime' => 0, 'overtime_pending' => 0];
+    $totals = ['late' => 0, 'absence' => 0, 'report' => 0, 'conduct' => 0, 'overtime' => 0];
+    $counts = ['late' => 0, 'absence' => 0, 'report' => 0, 'conduct' => 0, 'overtime' => 0, 'overtime_pending' => 0];
     foreach ($calendar as $d) {
         $date = $d['date'];
         if ($date < $since || $date > today()) {
@@ -185,6 +188,31 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
                 'marks' => array_keys($m)];
         }
     }
+    // Automatic deductions (missed clock-out, no GPS, skipped sign-off, overdue items, returned jobs) on the day they happened.
+    $byDate = [];
+    foreach ($days as $i => $d) {
+        $byDate[$d['date']] = $i;
+    }
+    $calByDate = array_column($calendar, null, 'date');
+    foreach (q('SELECT c.*, u.name AS waived_by_name FROM pay_charges c LEFT JOIN users u ON u.id = c.waived_by WHERE c.user_id = ? AND c.month = ? ORDER BY c.work_date, c.id',
+        [$uid, $month])->fetchAll() as $c) {
+        $waived = $c['waived_at'] !== null;
+        $item = ['code' => $c['code'], 'charge_id' => (int)$c['id'], 'label' => $c['label'], 'note' => $c['reason'], 'amount' => $waived ? 0 : -(float)$c['amount'],
+            'charge' => (float)$c['amount'], 'waived' => $waived ? 'Waived' . ($c['waived_by_name'] ? ' by ' . $c['waived_by_name'] : '') . ($c['waived_note'] !== '' ? ': ' . $c['waived_note'] : '') : null];
+        if (!$waived) {
+            $totals['conduct'] += (float)$c['amount'];
+            $counts['conduct']++;
+        }
+        if (!isset($byDate[$c['work_date']])) {
+            $cd = $calByDate[$c['work_date']] ?? [];
+            $days[] = ['date' => $c['work_date'], 'status' => $cd['status'] ?? '', 'in' => $cd['in'] ?? null, 'out' => $cd['out'] ?? null, 'items' => [], 'overtime' => null,
+                'marks' => array_keys($marks[$c['work_date']] ?? [])];
+            $byDate[$c['work_date']] = count($days) - 1;
+        }
+        $days[$byDate[$c['work_date']]]['items'][] = $item;
+    }
+    usort($days, fn($a, $b) => strcmp($a['date'], $b['date']));
+
     $adj = array_map(fn($a) => ['id' => (int)$a['id'], 'label' => $a['label'], 'amount' => (float)$a['amount'], 'note' => $a['note'], 'created_at' => $a['created_at'], 'by' => $a['by_name']],
         q('SELECT a.*, u.name AS by_name FROM pay_adjustments a LEFT JOIN users u ON u.id = a.created_by WHERE a.user_id = ? AND a.month = ? ORDER BY a.id', [$uid, $month])->fetchAll());
     $adjTotal = round(array_sum(array_column($adj, 'amount')), 2);
@@ -192,7 +220,7 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
         q('SELECT a.*, u.name AS by_name FROM pay_advances a LEFT JOIN users u ON u.id = a.created_by WHERE a.user_id = ? AND a.month = ? ORDER BY a.given_on, a.id', [$uid, $month])->fetchAll());
     $advTotal = round(array_sum(array_column($adv, 'amount')), 2);
     $salary = (float)$u['salary'];
-    $deductions = $totals['late'] + $totals['absence'] + $totals['report'];
+    $deductions = $totals['late'] + $totals['absence'] + $totals['report'] + $totals['conduct'];
     return [
         'locked' => false,
         'published_at' => null,
@@ -216,6 +244,8 @@ function payroll_calc(int $uid, string $month, bool $live = false): array
 /** Summary row for the payroll table. */
 function payroll_summary(array $c): array
 {
+    $c['totals'] += ['conduct' => 0];
+    $c['counts'] += ['conduct' => 0];
     return ['id' => $c['user']['id'], 'name' => $c['user']['name'], 'salary' => $c['salary'], 'deductions' => $c['deductions'], 'overtime' => $c['overtime'],
         'adjustments' => $c['adjustments_total'], 'advances' => $c['advances_total'], 'net' => $c['net'], 'counts' => $c['counts'], 'totals' => $c['totals'],
         'locked' => $c['locked'], 'published' => !empty($c['published_at']),
@@ -224,9 +254,18 @@ function payroll_summary(array $c): array
 
 /** What a staff member sees of their own month: salary, advances and expected balance, plus the attendance record.
     Charge amounts, adjustments and net pay stay hidden until the admin publishes the month. */
-function payroll_staff_view(array $c): array
+function payroll_staff_view(array $c, ?array $vis = null): array
 {
     $published = !empty($c['published_at']);
+    $c['counts'] += ['conduct' => 0];
+    if ($vis && !$published) {
+        // Before the month is published, lines the admin chose to hide aren't sent at all.
+        foreach ($c['days'] as &$d) {
+            $d['items'] = array_values(array_filter($d['items'], fn($i) => $vis['categories'][charge_category($i['code'])] ?? true));
+        }
+        unset($d);
+        $c['days'] = array_values(array_filter($c['days'], fn($d) => $d['items'] || $d['overtime']));
+    }
     $advances = array_map(fn($a) => ['amount' => $a['amount'], 'given_on' => $a['given_on'], 'note' => $a['note']], $c['advances']);
     $base = [
         'locked' => $c['locked'],
@@ -278,12 +317,16 @@ function act_payroll_detail(array $in, array $me): void
 {
     if (is_admin($me)) {
         $uid = !empty($in['user_id']) ? (int)$in['user_id'] : $me['id'];
-        json_out(['ok' => true, 'rules' => pay_rules(), 'marks' => PAY_MARKS] + payroll_calc($uid, month_in($in)));
+        $c = payroll_calc($uid, month_in($in));
+        $c['totals'] += ['conduct' => 0];
+        $c['counts'] += ['conduct' => 0];
+        json_out(['ok' => true, 'rules' => pay_rules(), 'marks' => PAY_MARKS, 'can_waive' => can_approve_time($me)] + $c);
     }
     // Staff see their record but no amounts; deductions are for admins only.
     $r = pay_rules();
     $rules = ['report_deadline' => $r['report_deadline'], 'very_late_min' => $r['very_late_min'], 'overtime_min' => $r['overtime_min']];
-    json_out(['ok' => true, 'rules' => $rules] + payroll_staff_view(payroll_calc($me['id'], month_in($in))));
+    $vis = visibility_for($me['id']);
+    json_out(['ok' => true, 'rules' => $rules, 'statement' => $vis['statement']] + payroll_staff_view(payroll_calc($me['id'], month_in($in)), $vis));
 }
 
 function act_payroll_mark(array $in, array $me): void
@@ -535,11 +578,12 @@ function act_payroll_export(array $in, array $me): void
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
     fputcsv($out, ['Staff', 'Bank', 'Account number', 'Salary', 'Late days', 'Lateness charges', 'Absences', 'Absence charges', 'Missed reports', 'Report charges',
-        'Overtime days', 'Overtime pay', 'Adjustments', 'Salary advances', 'Net pay', 'Locked', 'Published']);
+        'Rule breaks', 'Rule-break charges', 'Overtime days', 'Overtime pay', 'Adjustments', 'Salary advances', 'Net pay', 'Locked', 'Published']);
     foreach (payroll_staff($month) as $s) {
         $x = payroll_summary(payroll_calc((int)$s['id'], $month));
         fputcsv($out, array_map(fn($v) => csv_safe((string)$v), [$x['name'], $x['bank_name'], $x['bank_account'], $x['salary'], $x['counts']['late'], $x['totals']['late'],
-            $x['counts']['absence'], $x['totals']['absence'], $x['counts']['report'], $x['totals']['report'], $x['counts']['overtime'], $x['overtime'],
+            $x['counts']['absence'], $x['totals']['absence'], $x['counts']['report'], $x['totals']['report'],
+            $x['counts']['conduct'] ?? 0, $x['totals']['conduct'] ?? 0, $x['counts']['overtime'], $x['overtime'],
             $x['adjustments'], $x['advances'], $x['net'], $x['locked'] ? 'Yes' : 'No', $x['published'] ? 'Yes' : 'No']));
     }
     exit;

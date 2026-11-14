@@ -865,6 +865,9 @@ function act_clock(array $in, array $me): void
     if ($action === 'out') {
         clock_out_pending_notice($me['id'], (bool)$lastStop);
     }
+    if (in_array('no_gps', $flags, true)) {
+        charge_no_gps($me['id'], $id, $action, $reason);
+    }
     $r = attendance_row(q('SELECT * FROM attendance WHERE id = ?', [$id])->fetch());
     json_out(['ok' => true, 'record' => $r]);
 }

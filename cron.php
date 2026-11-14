@@ -20,6 +20,7 @@ require __DIR__ . '/inc/reminders.php';
 require __DIR__ . '/inc/due_reminders.php';
 require __DIR__ . '/inc/api_clock_problems.php';
 require __DIR__ . '/inc/ai.php';
+require __DIR__ . '/inc/discipline.php';
 
 $cli = PHP_SAPI === 'cli';
 if (!$cli) {

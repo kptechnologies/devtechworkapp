@@ -342,6 +342,26 @@
   }, { title: 'Import history', admin: true });
 
   /* ------------------------------------------------------------- settings */
+  /** Visibility switches (company setting and per-staff override share this markup). */
+  function visFields(v, cats) {
+    const row = (name, on, label) => `<label class="check-row" style="margin-bottom:8px"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span>${label}</span></label>`;
+    return row('statement', v.statement, 'Show the <b>My deductions</b> statement page')
+      + row('amounts', v.amounts, 'Show amounts (₦). Off: staff see what they were charged for and why, but not how much')
+      + row('before_publish', v.before_publish, 'Show amounts before you publish the month on the Payroll page (off: only published months show amounts)')
+      + row('weekly_report', v.weekly_report, 'Send the weekly performance report')
+      + `<div class="field" style="margin-top:6px"><div class="label">Deductions staff can see</div><div class="opts">${Object.entries(cats).map(([k, label]) =>
+        `<label class="opt"><input type="checkbox" data-cat="${k}" ${v.categories[k] ? 'checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div>
+        <div class="help">A hidden kind is still charged, but isn't shown or alerted. Published payslips always show everything.</div></div>`;
+  }
+  function visRead(form) {
+    const v = { categories: {} };
+    ['statement', 'amounts', 'before_publish', 'weekly_report'].forEach((k) => { v[k] = !!form.querySelector(`[name=${k}]`)?.checked; });
+    form.querySelectorAll('[data-cat]').forEach((c) => { v.categories[c.dataset.cat] = c.checked; });
+    return v;
+  }
+  App.visFields = visFields;
+  App.visRead = visRead;
+
   App.route('settings', async (ctx) => {
     const s = (await api('settings_get')).settings;
     const list = (k, label, help) => `<div class="field"><label for="se-${k}">${label}</label><textarea id="se-${k}" name="${k}" rows="6">${esc((s[k] || []).join('\n'))}</textarea><div class="help">${help}</div></div>`;
@@ -429,7 +449,18 @@
           <div class="form-row">${payField('overtime', 'Overtime, per approved day')}${payField('overtime_min', 'Overtime after closing (minutes)', 'min')}</div>
           <div class="field"><label for="se-pay-ef">Rules apply from</label><input type="date" id="se-pay-ef" name="effective_from" value="${esc(pr.effective_from)}" style="max-width:220px">
             <div class="help">Days before this date are never charged.</div></div>
+          <h4 style="margin:16px 0 4px">Automatic deductions for broken rules</h4>
+          <p class="muted small" style="margin-bottom:10px">Charged automatically, with the reason, and the staff member is alerted on their phone. Set an amount to 0 to turn that rule off. You can waive any single deduction from the staff member's payroll drawer.</p>
+          <div class="form-row">${payField('missed_clockout', 'Did not clock out, per day')}${payField('no_gps', 'Clocked in/out without GPS, per day')}</div>
+          <div class="form-row">${payField('signoff_skipped', 'Job completed without client sign-off')}${payField('task_overdue', 'Job order item left overdue, each')}</div>
+          <div class="form-row">${payField('job_returned', 'Job sent back for rework, each person')}<div class="field"><label for="se-pay-df">Automatic deductions start from</label><input type="date" id="se-pay-df" name="discipline_from" value="${esc(pr.discipline_from)}"></div></div>
           <button class="btn primary" type="submit">Save pay rules</button></form>
+        <form class="card card-pad" id="se-vis"><h3 style="margin-bottom:4px">What staff see in their portal</h3>
+          <p class="muted small" style="margin-bottom:14px">Controls the <b>My deductions</b> statement, deduction alerts and the weekly performance report for every staff member. You can give one person different settings from their profile (Staff → open a person → Portal visibility).</p>
+          ${visFields(s.portal_visibility, s.visibility_categories)}
+          <div class="field" style="margin-top:12px"><label for="se-wrt">Send the weekly report on Mondays at</label><input type="time" id="se-wrt" name="weekly_report_time" value="${esc(s.weekly_report_time)}" style="max-width:160px">
+            <div class="help">Each staff member gets last week's report on their phone and sees it when they open the portal or clock in. You get a team summary. <a href="#/weekly">See weekly reports</a>.</div></div>
+          <button class="btn primary" type="submit">Save portal visibility</button></form>
         <form class="card card-pad" id="se-due"><h3 style="margin-bottom:4px">Before-due reminders</h3>
           <p class="muted small" style="margin-bottom:14px">Everyone on a task (or on a job with no tasks) is reminded before it's due, in the portal and on their phone.
             They can say Got it, ask again in 10 minutes, snooze, or escalate to the job creator and managers. Each job or task can change these times or turn them off.</p>
@@ -466,6 +497,13 @@
           work_days: (d.work_days || []).map(Number), require_signoff: d.require_signoff } }));
         Object.assign(App.cfg, { work_start: d.work_start, work_end: d.work_end, late_grace: +d.late_grace || 0 });
         toast('Attendance settings saved');
+      } catch (err) { App.fail(err); }
+    });
+    $('#se-vis', ctx.el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await App.busy(e.submitter, () => api('settings_save', { data: { portal_visibility: visRead(e.target), weekly_report_time: e.target.weekly_report_time.value } }));
+        toast('Portal visibility saved');
       } catch (err) { App.fail(err); }
     });
     $('#se-pay', ctx.el).addEventListener('submit', async (e) => {

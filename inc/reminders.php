@@ -30,6 +30,9 @@ function reminders_due(): bool
     if (setting('_rem_missed') !== $t) {
         return true;
     }
+    if (function_exists('weekly_reports_due') && (weekly_reports_due() || (setting('_rem_overdue') !== $t && time() >= strtotime($t . ' ' . work_end()) + 3600))) {
+        return true;
+    }
     $rs = reminder_settings();
     if (!$rs['enabled']) {
         return false;
@@ -73,6 +76,21 @@ function run_reminders(bool $force = false): array
         save_setting('_rem_missed', $t);
         $n = q('UPDATE attendance SET out_missed = 1 WHERE out_at IS NULL AND out_missed = 0 AND work_date < ?', [$t])->rowCount();
         $log[] = "Marked $n missed clock-out(s).";
+        if (function_exists('charge_missed_clockouts')) {
+            $log[] = 'Missed clock-out deductions: ' . charge_missed_clockouts() . '.';
+        }
+    }
+
+    // Job order items still overdue an hour after closing are charged once each (inc/discipline.php).
+    if (function_exists('charge_overdue_items') && setting('_rem_overdue') !== $t && time() >= strtotime($t . ' ' . work_end()) + 3600) {
+        save_setting('_rem_overdue', $t);
+        $log[] = 'Overdue item deductions: ' . charge_overdue_items() . '.';
+    }
+
+    // Monday: last week's performance report for every employee, on their phone and home page.
+    if (function_exists('weekly_reports_due') && weekly_reports_due()) {
+        save_setting('_rem_weekly', week_monday($t));
+        $log[] = 'Weekly reports sent: ' . weekly_reports_generate() . '.';
     }
 
     if ($force || ($rs['enabled'] && setting('_rem_digest') !== $t && time() >= strtotime("$t {$rs['time']}"))) {

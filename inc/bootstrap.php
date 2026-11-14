@@ -310,6 +310,10 @@ function ensure_schema(): void
         // Room for several school names in the display copy.
         q("ALTER TABLE users MODIFY location VARCHAR(500) NOT NULL DEFAULT ''");
     }
+    if ($from < 28) {
+        // Automatic deductions start the day this version goes live; earlier days are never charged.
+        save_setting('_discipline_from', today());
+    }
     save_setting('_schema_version', SCHEMA_VERSION);
 }
 

@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -800,6 +800,40 @@ function table_sql(): array
             PRIMARY KEY (doc_id, user_id),
             KEY idx_user (user_id)
         ) $t",
+        // v28: automatic deductions for broken rules (missed clock-out, no GPS, skipped sign-off, overdue task, returned job).
+        // One row per event; the unique key stops the same event being charged twice.
+        "CREATE TABLE IF NOT EXISTS pay_charges (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            work_date DATE NOT NULL,
+            month CHAR(7) NOT NULL,
+            code VARCHAR(30) NOT NULL,
+            ref_type VARCHAR(20) NOT NULL,
+            ref_id INT UNSIGNED NOT NULL,
+            label VARCHAR(200) NOT NULL,
+            reason VARCHAR(500) NOT NULL DEFAULT '',
+            amount DECIMAL(12,2) NOT NULL,
+            waived_by INT UNSIGNED NULL,
+            waived_note VARCHAR(500) NOT NULL DEFAULT '',
+            waived_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uq_event (user_id, code, ref_type, ref_id),
+            KEY idx_month_user (month, user_id),
+            KEY idx_user_date (user_id, work_date)
+        ) $t",
+        // v28: each staff member's weekly performance report, kept so they (and the admin) can look back
+        "CREATE TABLE IF NOT EXISTS weekly_reports (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            week_start DATE NOT NULL,
+            data MEDIUMTEXT NOT NULL,
+            score TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            notified_at DATETIME NULL,
+            seen_at DATETIME NULL,
+            UNIQUE KEY uq_user_week (user_id, week_start),
+            KEY idx_week (week_start)
+        ) $t",
     ];
 }
 
@@ -888,6 +922,8 @@ function column_sql(): array
         ['ai_suggestions', 'chat_id', 'INT UNSIGNED NULL'],
         // v27: who a work doc is open to: 'job' = everyone on its job (and the people it's shared with), 'picked' = only the people it's shared with
         ['work_docs', 'access', "VARCHAR(8) NOT NULL DEFAULT 'job'"],
+        // v28: what this staff member may see of their deductions and weekly report (JSON); NULL = the company setting
+        ['users', 'portal_visibility', 'TEXT NULL'],
     ];
 }
 

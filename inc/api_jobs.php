@@ -561,6 +561,14 @@ function act_job_status(array $in, array $me): void
     audit('job_' . $action, 'job', $job['id']);
     db()->commit();
     touch_change();
+    if ($action === 'complete' && !$signoff['signed'] && setting('require_signoff') !== false) {
+        add_charge($me['id'], today(), 'signoff_skipped', 'job', (int)$job['id'],
+            "{$job['ref']} {$job['title']} was marked complete without the client's signature. Your reason: \"{$signoff['skipped']}\"");
+    } elseif ($action === 'return') {
+        foreach (job_assignee_ids($job['id']) as $uid) {
+            add_charge((int)$uid, today(), 'job_returned', 'job_update', $noteId, "{$job['ref']} {$job['title']} was sent back by {$me['name']}: $note");
+        }
+    }
 
     if ($action === 'complete') {
         notify_managers('job', "{$me['name']} completed {$job['ref']}: {$job['title']}", 'Check the photos and approve it within an hour, '

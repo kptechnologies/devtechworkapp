@@ -10,3 +10,6 @@ uploads/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Local test sign-in (never commit)
+local-test-login.txt
