@@ -1074,7 +1074,24 @@ function act_attendance_list(array $in, array $me): void
         }
         unset($a);
     }
-    json_out(['ok' => true, 'from' => $from, 'to' => $to, 'work_start' => work_start(), 'items' => $rows, 'absent' => $absent]);
+    // Lateness the admin excused (permission to report late) — the payroll charge is waived for these days.
+    $canExcuse = is_admin($me);
+    if (is_management($me) && $rows) {
+        $excused = [];
+        foreach (q("SELECT user_id, work_date, note FROM pay_marks WHERE kind = 'late_approved' AND work_date BETWEEN ? AND ?", [$from, $to])->fetchAll() as $m) {
+            $excused[$m['user_id'] . '|' . $m['work_date']] = (string)$m['note'];
+        }
+        $locked = [];
+        foreach (q('SELECT user_id, month FROM pay_locks WHERE month BETWEEN ? AND ?', [substr($from, 0, 7), substr($to, 0, 7)])->fetchAll() as $l) {
+            $locked[$l['user_id'] . '|' . $l['month']] = true;
+        }
+        foreach ($rows as &$r) {
+            $r['late_excused'] = $excused[$r['user_id'] . '|' . $r['work_date']] ?? null;
+            $r['pay_locked'] = isset($locked[$r['user_id'] . '|' . substr($r['work_date'], 0, 7)]);
+        }
+        unset($r);
+    }
+    json_out(['ok' => true, 'from' => $from, 'to' => $to, 'work_start' => work_start(), 'items' => $rows, 'absent' => $absent, 'can_excuse' => $canExcuse]);
 }
 
 /** Admin correction or manual entry (e.g. a staff member's phone died). */

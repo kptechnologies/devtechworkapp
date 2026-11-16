@@ -464,13 +464,22 @@
       r.items.forEach((x) => { if (!firstIns[x.user_id + x.work_date]) firstIns[x.user_id + x.work_date] = x; });
       const firsts = Object.values(firstIns);
       const lateN = firsts.filter((x) => x.late).length;
+      const excusedN = firsts.filter((x) => x.late && x.late_excused != null).length;
+      // Late pill, green once excused (no late charge in payroll), with Excuse / Undo for admins.
+      const latePill = (x) => {
+        const ex = x.late_excused != null;
+        const pill = ex ? `<span class="pill in" title="${esc('Permission to report late' + (x.late_excused ? ': ' + x.late_excused : ''))}">Late ${x.late_min}m · Excused</span>`
+          : `<span class="pill out">Late ${x.late_min}m</span>`;
+        const btn = r.can_excuse && !x.pay_locked ? ` <button class="btn sm ghost" data-excuse="${x.id}" data-on="${ex ? 0 : 1}" style="padding:0 6px" title="${ex ? 'Charge the lateness again' : 'Staff had permission to come late: no late charge'}">${ex ? 'Undo' : 'Excuse'}</button>` : '';
+        return pill + btn;
+      };
       const onSite = r.items.filter((x) => !x.out_at && !x.missed_out).length;
       const totalMin = r.items.reduce((a, x) => a + (x.minutes || 0), 0);
       $('#at-body', ctx.el).innerHTML = `
         <div class="grid g4" style="margin-bottom:14px">
           ${admin && single ? kpi('Clocked in', `${firsts.length} <span class="faint" style="font-size:15px">of ${firsts.length + r.absent.length}</span>`, `${r.absent.length} not in`, 'login', 'tone-brand')
             : kpi('Days present', new Set(firsts.map((x) => x.user_id + x.work_date)).size, `${fmtDate(r.from, false)} – ${fmtDate(r.to, false)}`, 'calendar-check', 'tone-brand')}
-          ${kpi('Late arrivals', lateN, `After ${esc(r.work_start)}`, 'clock-exclamation', lateN ? 'tone-out' : 'tone-in')}
+          ${kpi('Late arrivals', lateN, `After ${esc(r.work_start)}${excusedN ? ` · ${excusedN} excused` : ''}`, 'clock-exclamation', lateN > excusedN ? 'tone-out' : 'tone-in')}
           ${kpi('On site now', onSite, 'Not clocked out yet', 'map-pin', 'tone-info')}
           ${kpi('Hours logged', Math.round(totalMin / 6) / 10, 'Completed clock-outs', 'hourglass', 'tone-in')}
         </div>
@@ -478,7 +487,7 @@
           <span class="muted small"><i class="ti ti-user-off"></i> Not clocked in:</span>${r.absent.map((s) => s.suspended ? `<span class="pill" title="Suspended">${esc(s.name)} · suspended</span>` : `<button class="pill bad" data-add="${s.id}" title="Add manually">${esc(s.name)}</button>`).join('')}</div>` : ''}
         <div class="card">${r.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr>${single ? '' : '<th>Date</th>'}${admin ? '<th>Staff</th>' : ''}<th>Arrived</th><th>Left</th><th class="r">Hours</th><th>Location / work done</th><th>Selfies</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
           ${r.items.map((x) => `<tr>${single ? '' : `<td class="num">${esc(fmtDate(x.work_date, false))}</td>`}${admin ? `<td><a href="#/staff/${x.user_id}">${esc(x.user_name)}</a></td>` : ''}
-            <td class="num">${esc(timeOf(x.in_at))} ${x.late && firstIns[x.user_id + x.work_date] === x ? `<span class="pill out">Late ${x.late_min}m</span>` : ''}</td>
+            <td class="num">${esc(timeOf(x.in_at))} ${x.late && firstIns[x.user_id + x.work_date] === x ? latePill(x) : ''}</td>
             <td class="num">${x.out_at ? `${esc(timeOf(x.out_at))}${x.early ? ' <span class="pill out">Early</span>' : ''}` : x.missed_out ? '<span class="pill bad">No clock-out</span>' : '<span class="pill info">On site</span>'}</td>
             <td class="r num">${hrs(x.minutes)}</td>
             <td class="small">${x.location ? `<div style="font-weight:500">${esc(x.location)}</div>` : ''}${x.in_lat === null && x.source === 'admin' ? '' : where(x.in_site, x.in_dist, x.in_lat, x.in_lng)} ${flagPills(x.flags)}${visitTag(x)}
@@ -490,6 +499,21 @@
       App.bindGallery($('#at-body', ctx.el));
       $$('[data-edit]', ctx.el).forEach((b) => b.addEventListener('click', () => editAttendance(r.items.find((x) => x.id === +b.dataset.edit), staff, load)));
       $$('[data-add]', ctx.el).forEach((b) => b.addEventListener('click', () => editAttendance({ user_id: +b.dataset.add, work_date: r.from }, staff, load)));
+      $$('[data-excuse]', ctx.el).forEach((b) => b.addEventListener('click', async () => {
+        const x = r.items.find((i) => i.id === +b.dataset.excuse);
+        const on = b.dataset.on === '1';
+        let note = '';
+        if (on) {
+          note = await App.confirm('Excuse lateness', `${esc(x.user_name)} · ${esc(fmtDate(x.work_date))}. No late charge will be taken from their pay for this day.`,
+            { ok: 'Excuse', input: { label: 'Reason', required: true, placeholder: 'e.g. Called the manager at 7:30am about a hospital visit', requiredMsg: 'Say why.' } });
+          if (note === null) return;
+        }
+        try {
+          await App.busy(b, () => api('payroll_mark', { data: { user_id: x.user_id, date: x.work_date, kind: 'late_approved', on, note } }));
+          toast(on ? 'Lateness excused' : 'Late charge restored');
+          await load();
+        } catch (err) { App.fail(err); }
+      }));
     };
 
     const loadReport = async () => {
