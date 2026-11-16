@@ -124,7 +124,9 @@
         + (c.published_at ? `<div class="note-box small" style="margin-top:10px"><i class="ti ti-eye"></i> Published to the staff member on ${esc(fmtDate(c.published_at))}.</div>` : '')
         + `<div class="actions" style="margin-top:14px;flex-wrap:wrap"><button class="btn" id="pr-lock1"><i class="ti ti-${c.locked ? 'lock-open' : 'lock'}"></i>${c.locked ? 'Unlock' : 'Lock'} this staff member's month</button>
           <button class="btn ${c.published_at ? '' : 'primary'}" id="pr-pub1"><i class="ti ti-${c.published_at ? 'eye-off' : 'eye'}"></i>${c.published_at ? 'Unpublish' : 'Publish to staff'}</button>
+          <button class="btn" id="pr-stmt"><i class="ti ti-file-type-pdf"></i>Statement PDF</button>
           <a class="btn ghost" href="#/staff/${uid}"><i class="ti ti-user"></i>Profile</a></div>`;
+      $('#pr-stmt', body).addEventListener('click', () => App.statementDialog(uid, month));
       const changed = async () => { await load(); onChange && onChange(); };
       $('#pr-sal', body)?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -193,12 +195,13 @@
     let month = App.store.get('dt-paymonth', App.cfg.today.slice(0, 7));
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Payroll</h1><p class="muted">Salary less attendance charges, plus approved overtime. Rules are set in <a href="#/settings">Settings → Pay rules</a>.</p></div>
-        <div class="actions"><a class="btn" id="pr-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn" id="pr-pub"><i class="ti ti-eye"></i>Publish month</button><button class="btn primary" id="pr-lock"><i class="ti ti-lock"></i>Lock month</button></div></div>
+        <div class="actions"><a class="btn" id="pr-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn" id="pr-stmts"><i class="ti ti-send"></i>Send statements</button><button class="btn" id="pr-pub"><i class="ti ti-eye"></i>Publish month</button><button class="btn primary" id="pr-lock"><i class="ti ti-lock"></i>Lock month</button></div></div>
       <div class="filters" id="pr-filters">${monthPicker(month)}</div>
       <div id="pr-body">${App.loading()}</div>`;
     const load = async () => {
       const r = await api('payroll_list', { query: { month } });
       $('#pr-export', ctx.el).href = `api.php?action=payroll_export&month=${month}`;
+      $('#pr-stmts', ctx.el).onclick = () => App.statementSendAll(r.rows, month);
       const allLocked = r.rows.length && r.rows.every((x) => x.locked);
       const lockBtn = $('#pr-lock', ctx.el);
       lockBtn.innerHTML = `<i class="ti ti-${allLocked ? 'lock-open' : 'lock'}"></i>${allLocked ? 'Unlock month' : 'Lock month'}`;

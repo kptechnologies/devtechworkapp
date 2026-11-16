@@ -213,6 +213,7 @@ function act_settings_get(array $in, array $me): void
     json_out(['ok' => true, 'settings' => [
         'company_name' => setting('company_name') ?: cfg('company'),
         'company_address' => setting('company_address') ?: cfg('address', ''),
+        'letterhead' => letterhead(),
         'locations' => setting('locations'),
         'expense_categories' => setting('expense_categories'),
         'credit_types' => setting('credit_types'),
@@ -268,6 +269,9 @@ function act_settings_save(array $in, array $me): void
     }
     if (isset($in['company_address'])) {
         save_setting('company_address', str_in($in['company_address'], 300));
+    }
+    if (isset($in['letterhead']) && is_array($in['letterhead'])) {
+        letterhead_save($in['letterhead']);
     }
     if (isset($in['portal_visibility']) && is_array($in['portal_visibility'])) {
         save_setting('portal_visibility', visibility_clean($in['portal_visibility']));

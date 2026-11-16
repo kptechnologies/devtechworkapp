@@ -160,11 +160,13 @@
   App.route('my-statement', async (ctx) => {
     let months = 6;
     ctx.el.innerHTML = `<div class="page-head"><div><h1>My deductions</h1><p class="muted">Every deduction from your pay, with the reason. Talk to your admin if one is wrong.</p></div>
-      <div class="actions"><button class="btn" id="st-csv"><i class="ti ti-download"></i>Download</button><button class="btn" id="st-print"><i class="ti ti-printer"></i>Print</button></div></div>
+      <div class="actions"><button class="btn primary" id="st-pdf"><i class="ti ti-file-type-pdf"></i>Statement PDF</button><button class="btn" id="st-csv"><i class="ti ti-download"></i>Download CSV</button><button class="btn" id="st-print"><i class="ti ti-printer"></i>Print</button></div></div>
       <div class="filters" id="st-f"><label class="small muted" style="display:flex;gap:6px;align-items:center">Show <select name="months" style="width:auto">
         ${[3, 6, 12].map((n) => `<option value="${n}" ${n === months ? 'selected' : ''}>Last ${n} months</option>`).join('')}</select></label>
         <label class="small muted" style="display:flex;gap:6px;align-items:center">Kind <select name="cat" style="width:auto"><option value="">All</option></select></label></div>
-      <div id="st-body">${App.loading()}</div>`;
+      <div id="st-sent"></div><div id="st-body">${App.loading()}</div>`;
+    App.renderMyStatements($('#st-sent', ctx.el));
+    $('#st-pdf', ctx.el).addEventListener('click', () => App.myStatementPdf());
     let data = null;
     let cat = '';
     const draw = () => {

@@ -35,6 +35,8 @@ if (!is_admin($me) && !$managerFile) {
         'attend', 'attendout' => q('SELECT user_id FROM attendance WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'tool'    => q('SELECT holder_id FROM tools WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         'avatar'  => $a['owner_id'],
+        // Statements of account: the staff member they were sent to.
+        'statement' => $a['owner_id'],
         'query'   => q('SELECT user_id FROM staff_queries WHERE id = ?', [$a['owner_id']])->fetchColumn(),
         // Lesson evidence (including photos of pupils): only the staff member who took it, and admins.
         'lprep', 'lplan' => q('SELECT user_id FROM lesson_plans WHERE id = ?', [$a['owner_id']])->fetchColumn(),
