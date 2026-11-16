@@ -377,6 +377,11 @@
         <img src="assets/logo.png" alt="" class="login-logo" style="height:48px;border:1px solid var(--border)"><div><h3>Company</h3><p class="muted small">Shown on the sign-in page, emails and the sidebar.</p></div></div>
         <div class="form-row"><div class="field"><label for="se-cn">Company name</label><input id="se-cn" name="company_name" value="${esc(s.company_name || '')}"></div>
           <div class="field"><label for="se-ca">Address</label><input id="se-ca" name="company_address" value="${esc(s.company_address || '')}"></div></div>
+        <p class="muted small" style="margin:4px 0 10px">Letterhead on staff statements of account (PDF): phone, email and who signs them.</p>
+        <div class="form-row"><div class="field"><label for="se-lp">Phone</label><input id="se-lp" name="lh_phone" value="${esc(s.letterhead?.phone || '')}"></div>
+          <div class="field"><label for="se-le">Email</label><input id="se-le" name="lh_email" value="${esc(s.letterhead?.email || '')}"></div></div>
+        <div class="form-row"><div class="field"><label for="se-ls">Signed by</label><input id="se-ls" name="lh_signatory" value="${esc(s.letterhead?.signatory || '')}"></div>
+          <div class="field"><label for="se-lt">Their title</label><input id="se-lt" name="lh_signatory_title" value="${esc(s.letterhead?.signatory_title || '')}"></div></div>
         <button class="btn primary" type="submit">Save company details</button></form>
       <div class="grid g2">
         <form class="card card-pad" id="se-lists"><h3 style="margin-bottom:14px">Lists</h3>
@@ -548,7 +553,9 @@
     });
     $('#se-co', ctx.el).addEventListener('submit', async (e) => {
       e.preventDefault();
-      const d = App.formData(e.target);
+      const f = App.formData(e.target);
+      const d = { company_name: f.company_name, company_address: f.company_address,
+        letterhead: { phone: f.lh_phone, email: f.lh_email, signatory: f.lh_signatory, signatory_title: f.lh_signatory_title } };
       try {
         await App.busy(e.submitter, () => api('settings_save', { data: d }));
         App.cfg = (await api('session')).config;
