@@ -185,8 +185,9 @@
     ['admin', 'Admin', 'Full access, including payroll, wallets, company and settings.'],
   ];
   /** Account modal: name, email, role, active, password. */
-  function editUser(u, onSaved) {
+  function editUser(u, onSaved, opts = {}) {
     const isNew = !u;
+    if (u && opts.leave && !u.leave_from) u = { ...u, leave_from: App.cfg.today };
     u = u || { name: '', email: '', phone: '', schools: [], role: 'staff', active: 1 };
     const el = App.modal(isNew ? 'Add staff' : `Edit ${esc(u.name)}`, `
       <form id="us-form" novalidate>
