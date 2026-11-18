@@ -924,6 +924,7 @@
       const p = await api('staff_profile', { query: { id: id || '' } });
       if (tab === 'wallet' && !p.wallet) tab = 'details';
       const u = p.user;
+      const onLeave = !!u.leave_from && u.leave_from <= App.cfg.today && (!u.leave_to || u.leave_to >= App.cfg.today);
       const m = p.month;
       ctx.el.innerHTML = `
         <div class="card card-pad profile-head" style="margin-bottom:14px">
@@ -932,7 +933,9 @@
             <div class="muted">${[u.job_title, u.role === 'admin' ? 'Administrator' : u.role !== 'staff' ? App.roleLabel(u.role) : '', u.location].filter(Boolean).map(esc).join(' · ') || 'Staff'}</div>
             <div class="small muted" style="margin-top:4px">${esc(u.email)}${u.phone ? ` · <a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : ''}</div>
             ${u.duties.length ? `<div class="chips" style="margin-top:8px">${u.duties.map((d) => `<span class="pill brand">${esc(d)}</span>`).join('')}</div>` : ''}</div>
-          <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
+          <div class="actions">${(admin && !self) || managerEdits(u, self) ? '<button class="btn" id="pf-account"><i class="ti ti-key"></i>Account &amp; password</button>' : ''}${((admin && !self) || managerEdits(u, self)) && u.active
+              ? (onLeave ? `<button class="btn" id="pf-leave" title="${esc(u.leave_note || 'Change or end the leave')}"><i class="ti ti-beach"></i>On leave${u.leave_to ? ' until ' + esc(fmtDate(u.leave_to, false)) : ''}</button>`
+                : '<button class="btn" id="pf-leave"><i class="ti ti-beach"></i>Put on leave</button>') : ''}${admin && !self ? `<a class="btn" href="#/wallet/${u.id}"><i class="ti ti-wallet"></i>Wallet</a>` : ''}
             ${self ? '<button class="btn" id="pf-out"><i class="ti ti-logout"></i>Sign out</button>' : ''}${!u.active ? '<span class="pill">Inactive</span>' : ''}
             ${p.suspension ? `<a class="pill bad" href="#/queries/${p.suspension.id}">Suspended until ${esc(fmtDate(p.suspension.to, false))}</a>` : ''}</div>
         </div>
@@ -960,6 +963,11 @@
       $('#pf-account', ctx.el)?.addEventListener('click', async () => {
         const acct = (await api('users_list')).items.find((x) => x.id === u.id);
         App.editUser?.(acct, load);
+      });
+      $('#pf-leave', ctx.el)?.addEventListener('click', async () => {
+        const acct = (await api('users_list')).items.find((x) => x.id === u.id);
+        App.editUser?.(acct, load, { leave: true });
+        setTimeout(() => document.getElementById('us-leave')?.scrollIntoView({ block: 'center' }), 50);
       });
       $('#pf-photo', ctx.el)?.addEventListener('change', async (e) => {
         const f = e.target.files[0];

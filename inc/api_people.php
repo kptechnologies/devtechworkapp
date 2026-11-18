@@ -3,7 +3,7 @@
 
 const TOOL_CONDITIONS = ['good', 'fair', 'faulty', 'repair', 'lost', 'retired'];
 const PROFILE_COLS = 'id, name, email, phone, role, location, schools, job_title, duties, address, next_of_kin, next_of_kin_phone,
-    bank_name, bank_account, start_date, salary, photo_id, active, last_login, created_at';
+    bank_name, bank_account, start_date, salary, photo_id, active, last_login, created_at, leave_from, leave_to, leave_note';
 
 /* ---------------------------------------------------------------- profile */
 
