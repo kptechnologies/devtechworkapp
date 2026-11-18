@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 30;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -834,6 +834,22 @@ function table_sql(): array
             UNIQUE KEY uq_user_week (user_id, week_start),
             KEY idx_week (week_start)
         ) $t",
+        // v29: a staff member's signed acknowledgement of a statement of account; while unsigned the portal is locked for them
+        "CREATE TABLE IF NOT EXISTS statement_acks (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            period VARCHAR(20) NOT NULL,
+            attachment_id INT UNSIGNED NULL,
+            requested_by INT UNSIGNED NULL,
+            requested_at DATETIME NOT NULL,
+            signed_at DATETIME NULL,
+            signed_name VARCHAR(120) NOT NULL DEFAULT '',
+            signature MEDIUMTEXT NULL,
+            signed_ip VARCHAR(45) NOT NULL DEFAULT '',
+            UNIQUE KEY uq_user_period (user_id, period),
+            KEY idx_period (period),
+            KEY idx_pending (user_id, signed_at)
+        ) $t",
     ];
 }
 
@@ -924,6 +940,10 @@ function column_sql(): array
         ['work_docs', 'access', "VARCHAR(8) NOT NULL DEFAULT 'job'"],
         // v28: what this staff member may see of their deductions and weekly report (JSON); NULL = the company setting
         ['users', 'portal_visibility', 'TEXT NULL'],
+        // v30: staff on leave (leave_to NULL = until further notice) are left off the dashboard, attendance and payment lists
+        ['users', 'leave_from', 'DATE NULL'],
+        ['users', 'leave_to', 'DATE NULL'],
+        ['users', 'leave_note', "VARCHAR(200) NOT NULL DEFAULT ''"],
     ];
 }
 

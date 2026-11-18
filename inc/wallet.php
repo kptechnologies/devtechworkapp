@@ -40,7 +40,7 @@ function wallet_all_balances(): array
 {
     $t = today();
     $m = date('Y-m-01');
-    $rows = q("SELECT u.id, u.name, u.email, u.location, u.active,
+    $rows = q("SELECT u.id, u.name, u.email, u.location, u.active, NOT " . not_on_leave_sql('u') . " AS on_leave,
             COALESCE(SUM(CASE WHEN w.status <> 'rejected' THEN w.effect END),0) AS balance,
             COALESCE(SUM(CASE WHEN w.status <> 'rejected' AND w.kind='debit' AND w.txn_date = ? THEN w.amount END),0) AS spent_today,
             COALESCE(SUM(CASE WHEN w.status <> 'rejected' AND w.kind='debit' AND w.txn_date >= ? THEN w.amount END),0) AS spent_month,
@@ -49,7 +49,7 @@ function wallet_all_balances(): array
             MAX(w.created_at) AS last_activity
         FROM users u LEFT JOIN wallet_txns w ON w.user_id = u.id
         WHERE u.role IN ('staff','supervisor','subadmin','manager') OR w.id IS NOT NULL
-        GROUP BY u.id, u.name, u.email, u.location, u.active
+        GROUP BY u.id, u.name, u.email, u.location, u.active, u.leave_from, u.leave_to
         ORDER BY u.active DESC, u.name", [$t, $m, $t])->fetchAll();
     foreach ($rows as &$r) {
         $r['id'] = (int)$r['id'];
@@ -57,6 +57,7 @@ function wallet_all_balances(): array
             $r[$k] = round((float)$r[$k], 2);
         }
         $r['pending'] = (int)$r['pending'];
+        $r['on_leave'] = (bool)$r['on_leave'];
     }
     return $rows;
 }

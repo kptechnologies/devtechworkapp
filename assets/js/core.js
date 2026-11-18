@@ -157,14 +157,20 @@
 
   /* ----------------------------------------------------------- overlays */
   const stack = [];
-  function closeTop() {
-    const top = stack.pop();
-    if (!top) return;
-    top.els.forEach((e) => e.remove());
-    top.onClose && top.onClose();
+  function removeLayer(layer) {
+    const i = stack.indexOf(layer);
+    if (i < 0) return;
+    stack.splice(i, 1);
+    layer.els.forEach((e) => e.remove());
+    layer.onClose && layer.onClose();
     if (!stack.length) document.body.style.overflow = '';
   }
-  function openLayer(className, html, { onClose } = {}) {
+  /** Closes the top layer, unless it is locked (a must-finish step such as signing a statement). */
+  function closeTop() {
+    const top = stack[stack.length - 1];
+    if (top && !top.locked) removeLayer(top);
+  }
+  function openLayer(className, html, { onClose, locked = false } = {}) {
     const bd = document.createElement('div');
     bd.className = 'backdrop';
     const el = document.createElement('div');
@@ -172,11 +178,13 @@
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
     el.innerHTML = html;
+    if (locked) { bd.classList.add('locked'); el.classList.add('locked'); }
     bd.addEventListener('click', closeTop);
     $('#overlay-root').append(bd, el);
     document.body.style.overflow = 'hidden';
-    const layer = { els: [bd, el], onClose };
+    const layer = { els: [bd, el], onClose, locked };
     stack.push(layer);
+    el.closeLayer = () => removeLayer(layer); // the only way to close a locked layer
     $$('[data-close]', el).forEach((b) => b.addEventListener('click', closeTop));
     setTimeout(() => el.querySelector('[autofocus]')?.focus(), 50);
     return el;
@@ -187,10 +195,10 @@
     `<div class="drawer-head"><h2>${title}</h2><button class="icon-btn" data-close aria-label="Close"><i class="ti ti-x"></i></button></div>
      <div class="drawer-body">${body}</div>${foot ? `<div class="drawer-foot">${foot}</div>` : ''}`, opts);
   App.modal = (title, body, foot = '', opts = {}) => openLayer('modal' + (opts.wide ? ' wide' : ''),
-    `<div class="drawer-head"><h2>${title}</h2><button class="icon-btn" data-close aria-label="Close"><i class="ti ti-x"></i></button></div>
+    `<div class="drawer-head"><h2>${title}</h2>${opts.locked ? '' : '<button class="icon-btn" data-close aria-label="Close"><i class="ti ti-x"></i></button>'}</div>
      <div class="drawer-body">${body}</div>${foot ? `<div class="drawer-foot">${foot}</div>` : ''}`, opts);
   App.closeTop = closeTop;
-  App.closeAll = () => { while (stack.length) closeTop(); };
+  App.closeAll = () => { stack.filter((l) => !l.locked).reverse().forEach(removeLayer); };
   App.hasOverlay = () => stack.length > 0;
   App.confirm = (title, message, { ok = 'Confirm', danger = false, input = null } = {}) => new Promise((resolve) => {
     let done = false;
@@ -739,7 +747,8 @@
         App.current.refresh && App.current.refresh();
       }
       App.lastChange = p.change;
-      showDueReminders(p.due_reminders);
+      if (p.statement_ack_pending && App.checkStatementAck) App.checkStatementAck();
+      else showDueReminders(p.due_reminders);
     } catch (e) {
       if (e.offline) $('#live-dot')?.classList.add('off');
     }
@@ -800,6 +809,7 @@
     if (!App.user) { renderLogin(); return; }
     renderShell();
     route();
+    if (App.cfg.statement_ack_pending && App.checkStatementAck) App.checkStatementAck();
     startPolling();
   }
   App.start = async () => {

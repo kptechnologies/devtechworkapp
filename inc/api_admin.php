@@ -56,7 +56,7 @@ function act_dashboard(array $in, array $me): void
             JOIN (SELECT location, MAX(id) AS id FROM reports WHERE report_date BETWEEN ? AND ? AND location <> '' GROUP BY location) x ON x.id = r.id
             ORDER BY r.laptops_faulty DESC", [$from, $to])->fetchAll();
 
-    $activeStaff = q("SELECT id, name FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1 ORDER BY name")->fetchAll();
+    $activeStaff = q("SELECT id, name FROM users WHERE role IN ('staff','supervisor','subadmin','manager') AND active = 1 AND " . not_on_leave_sql() . ' ORDER BY name')->fetchAll();
     $reportedToday = array_map('intval', q('SELECT DISTINCT user_id FROM reports WHERE report_date = ?', [today()])->fetchAll(PDO::FETCH_COLUMN));
     $missing = array_values(array_filter($activeStaff, fn($s) => !in_array((int)$s['id'], $reportedToday, true)));
 
@@ -108,7 +108,7 @@ function act_dashboard(array $in, array $me): void
 function act_users_list(array $in, array $me): void
 {
     require_management();
-    $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.schools, u.active, u.last_login, u.created_at,
+    $rows = q("SELECT u.id, u.name, u.email, u.phone, u.role, u.location, u.schools, u.active, u.last_login, u.created_at, u.leave_from, u.leave_to, u.leave_note,
                u.password_hash IS NOT NULL AS has_password,
                (SELECT MAX(report_date) FROM reports r WHERE r.user_id = u.id) AS last_report,
                (SELECT COUNT(*) FROM reports r WHERE r.user_id = u.id) AS reports,
@@ -118,6 +118,7 @@ function act_users_list(array $in, array $me): void
     foreach ($rows as &$r) {
         $r['id'] = (int)$r['id'];
         $r['active'] = (int)$r['active'];
+        $r['on_leave'] = on_leave_on($r, today());
         $r['suspended_until'] = isset($susp[$r['id']]) ? max(array_column($susp[$r['id']], 1)) : null;
         $r['has_password'] = (bool)$r['has_password'];
         $r['schools'] = user_schools($r);
@@ -173,6 +174,11 @@ function act_user_save(array $in, array $me): void
     if ($id === $me['id'] && is_admin($me) && ($role !== 'admin' || !$active)) {
         $errors['role'] = 'You can\'t remove your own admin access.';
     }
+    $leaveFrom = !empty($in['on_leave']) ? (valid_date($in['leave_from'] ?? null) ? $in['leave_from'] : today()) : null;
+    $leaveTo = $leaveFrom && valid_date($in['leave_to'] ?? null) ? $in['leave_to'] : null;
+    if ($leaveTo && $leaveTo < $leaveFrom) {
+        $errors['leave_to'] = 'The return date must be on or after the start date.';
+    }
     if ($errors) {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
     }
@@ -184,6 +190,11 @@ function act_user_save(array $in, array $me): void
         q('INSERT INTO users (name, email, phone, role, active, created_at) VALUES (?,?,?,?,?,NOW())', $vals);
         $id = (int)db()->lastInsertId();
         audit('user_create', 'user', $id, ['email' => $email, 'role' => $role]);
+    }
+    $oldLeave = q('SELECT leave_from, leave_to FROM users WHERE id = ?', [$id])->fetch() ?: [];
+    q('UPDATE users SET leave_from = ?, leave_to = ?, leave_note = ? WHERE id = ?', [$leaveFrom, $leaveTo, $leaveFrom ? str_in($in['leave_note'] ?? '', 200) : '', $id]);
+    if (($oldLeave['leave_from'] ?? null) !== $leaveFrom || ($oldLeave['leave_to'] ?? null) !== $leaveTo) {
+        audit('user_leave', 'user', $id, ['from' => $leaveFrom, 'to' => $leaveTo]);
     }
     if (isset($in['schools']) || isset($in['location'])) {
         save_user_schools($id, clean_schools($in['schools'] ?? [$in['location']]));

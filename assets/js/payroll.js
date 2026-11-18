@@ -195,13 +195,14 @@
     let month = App.store.get('dt-paymonth', App.cfg.today.slice(0, 7));
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Payroll</h1><p class="muted">Salary less attendance charges, plus approved overtime. Rules are set in <a href="#/settings">Settings → Pay rules</a>.</p></div>
-        <div class="actions"><a class="btn" id="pr-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn" id="pr-stmts"><i class="ti ti-send"></i>Send statements</button><button class="btn" id="pr-pub"><i class="ti ti-eye"></i>Publish month</button><button class="btn primary" id="pr-lock"><i class="ti ti-lock"></i>Lock month</button></div></div>
+        <div class="actions"><a class="btn" id="pr-export"><i class="ti ti-download"></i>Export CSV</a><button class="btn" id="pr-stmts"><i class="ti ti-send"></i>Send statements</button><button class="btn" id="pr-signs"><i class="ti ti-signature"></i>Sign-offs</button><button class="btn" id="pr-pub"><i class="ti ti-eye"></i>Publish month</button><button class="btn primary" id="pr-lock"><i class="ti ti-lock"></i>Lock month</button></div></div>
       <div class="filters" id="pr-filters">${monthPicker(month)}</div>
       <div id="pr-body">${App.loading()}</div>`;
     const load = async () => {
       const r = await api('payroll_list', { query: { month } });
       $('#pr-export', ctx.el).href = `api.php?action=payroll_export&month=${month}`;
       $('#pr-stmts', ctx.el).onclick = () => App.statementSendAll(r.rows, month);
+      $('#pr-signs', ctx.el).onclick = () => App.statementSignoffs(month);
       const allLocked = r.rows.length && r.rows.every((x) => x.locked);
       const lockBtn = $('#pr-lock', ctx.el);
       lockBtn.innerHTML = `<i class="ti ti-${allLocked ? 'lock-open' : 'lock'}"></i>${allLocked ? 'Unlock month' : 'Lock month'}`;

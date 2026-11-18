@@ -118,7 +118,9 @@ function act_staff_statement(array $in, array $me): void
     json_out(['ok' => true, 'from' => $from, 'to' => $to, 'months' => $months, 'skipped' => $skipped,
         'user' => ['id' => (int)$u['id'], 'name' => $u['name'], 'email' => $u['email'], 'phone' => $u['phone'], 'job_title' => $u['job_title'],
             'bank_name' => $u['bank_name'], 'bank_account' => $u['bank_account']],
-        'letterhead' => letterhead(), 'sent' => statements_sent($uid)]);
+        'letterhead' => letterhead(), 'sent' => statements_sent($uid),
+        'ack' => q('SELECT signed_name, signature, signed_at FROM statement_acks WHERE user_id = ? AND period = ? AND signed_at IS NOT NULL',
+            [$uid, $from === $to ? $from : $from . '_' . $to])->fetch() ?: null]);
 }
 
 /** POST user_id, period + one PDF file: save it to the staff member's statements and alert them. */
@@ -143,13 +145,98 @@ function act_staff_statement_send(array $in, array $me): void
     }
     $period = str_in($in['period'] ?? '', 60);
     $note = str_in($in['note'] ?? '', 500);
+    $key = (string)($in['period_key'] ?? '');
+    $ack = !empty($in['require_ack']) && valid_period_key($key);
+    if ($ack) {
+        // A re-sent statement replaces the old one and has to be signed again.
+        q("INSERT INTO statement_acks (user_id, period, attachment_id, requested_by, requested_at) VALUES (?, ?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE attachment_id = VALUES(attachment_id), requested_by = VALUES(requested_by), requested_at = NOW(),
+             signed_at = NULL, signed_name = '', signature = NULL, signed_ip = ''", [$uid, $key, $ids[0], $me['id']]);
+        $body = "Please review, sign and acknowledge it. You won't be able to continue in the portal until you do.";
+    } else {
+        $body = 'Open My deductions to download the PDF.';
+    }
     notify([$uid], 'statement', 'Your statement of account' . ($period !== '' ? " for $period" : '') . ' is ready',
-        ($note !== '' ? $note . "\n" : '') . 'Open My deductions to download the PDF.', '#/my-statement');
-    json_out(['ok' => true, 'id' => $ids[0]]);
+        ($note !== '' ? $note . "\n" : '') . $body, 'my-statement');
+    json_out(['ok' => true, 'id' => $ids[0], 'ack' => $ack]);
 }
 
 /** Staff: statements sent to me. */
 function act_statements_mine(array $in, array $me): void
 {
     json_out(['ok' => true, 'sent' => statements_sent($me['id'])]);
+}
+
+/* ------------------------------------------------------------------ sign-off of a sent statement */
+
+/** "2026-10" or "2026-09_2026-10". */
+function valid_period_key(string $key): bool
+{
+    return (bool)preg_match('/^\d{4}-\d{2}(_\d{4}-\d{2})?$/', $key);
+}
+
+/** "2026-10" → "October 2026"; "2026-09_2026-10" → "September 2026 – October 2026". */
+function statement_period_label(string $key): string
+{
+    return implode(' – ', array_map(fn($m) => date('F Y', strtotime($m . '-01')), explode('_', $key)));
+}
+
+/** The oldest statement this user still has to sign, or null. */
+function statement_ack_pending_row(int $uid): ?array
+{
+    $r = q('SELECT k.id, k.period, k.attachment_id, k.requested_at, a.original_name FROM statement_acks k
+            LEFT JOIN attachments a ON a.id = k.attachment_id
+            WHERE k.user_id = ? AND k.signed_at IS NULL ORDER BY k.requested_at, k.id LIMIT 1', [$uid])->fetch();
+    return $r ?: null;
+}
+
+/** GET: the statement I must sign before I can use the portal (null when none). */
+function act_statement_ack_pending(array $in, array $me): void
+{
+    $r = statement_ack_pending_row($me['id']);
+    json_out(['ok' => true, 'pending' => $r ? ['id' => (int)$r['id'], 'period' => $r['period'], 'label' => statement_period_label($r['period']),
+        'file_id' => $r['attachment_id'] ? (int)$r['attachment_id'] : null, 'file_name' => $r['original_name'], 'requested_at' => $r['requested_at']] : null]);
+}
+
+/** POST id, name, agree, signature (PNG data URL): sign and acknowledge a statement. */
+function act_statement_ack_sign(array $in, array $me): void
+{
+    $id = (int)($in['id'] ?? 0);
+    $r = q('SELECT id, period FROM statement_acks WHERE id = ? AND user_id = ?', [$id, $me['id']])->fetch();
+    if (!$r) {
+        fail('Statement not found.', 404);
+    }
+    $name = str_in($in['name'] ?? '', 120);
+    if (mb_strlen($name) < 3) {
+        fail('Type your full name.');
+    }
+    if (empty($in['agree'])) {
+        fail('Tick the box to confirm you have read and acknowledge the statement.');
+    }
+    $sig = (string)($in['signature'] ?? '');
+    if (strlen($sig) < 200 || strlen($sig) > 200000 || !preg_match('#^data:image/png;base64,[A-Za-z0-9+/=]+$#', $sig)) {
+        fail('Draw your signature in the box.');
+    }
+    $done = q('UPDATE statement_acks SET signed_at = NOW(), signed_name = ?, signature = ?, signed_ip = ? WHERE id = ? AND signed_at IS NULL',
+        [$name, $sig, substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45), $id])->rowCount();
+    if ($done) {
+        notify_admins('statement_signed', $me['name'] . ' signed their statement for ' . statement_period_label($r['period']),
+            'Signed as "' . $name . '".', 'payroll', false);
+    }
+    json_out(['ok' => true, 'pending' => (bool)statement_ack_pending_row($me['id'])]);
+}
+
+/** GET period (YYYY-MM or YYYY-MM_YYYY-MM), admin: who has signed that statement and who has not. */
+function act_statement_acks(array $in, array $me): void
+{
+    require_admin();
+    $key = (string)($in['period'] ?? '');
+    if (!valid_period_key($key)) {
+        fail('Pick a month.');
+    }
+    $rows = q('SELECT k.user_id, u.name, k.requested_at, k.signed_at, k.signed_name, k.signature, k.attachment_id
+               FROM statement_acks k JOIN users u ON u.id = k.user_id WHERE k.period = ? ORDER BY k.signed_at IS NOT NULL, u.name', [$key])->fetchAll();
+    json_out(['ok' => true, 'period' => $key, 'label' => statement_period_label($key), 'rows' => array_map(fn($x) => [
+        'user_id' => (int)$x['user_id'], 'name' => $x['name'], 'requested_at' => $x['requested_at'], 'signed_at' => $x['signed_at'],
+        'signed_name' => $x['signed_name'], 'signature' => $x['signature'], 'file_id' => $x['attachment_id'] ? (int)$x['attachment_id'] : null], $rows)]);
 }

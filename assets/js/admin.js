@@ -197,7 +197,13 @@
         <div class="form-row"><div class="field" data-field="role"><div class="label">Role</div><div class="opts">
           ${ROLE_CHOICES.filter(([r]) => App.isAdmin() || ['staff', 'supervisor', 'subadmin'].includes(r)).map(([r, l, tip]) =>
             `<label class="opt" title="${esc(tip)}"><input type="radio" name="role" value="${r}" ${(u.role || 'staff') === r ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
-          <div class="field"><div class="label">Status</div><label class="check-row" style="padding:9px 12px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}><span>Active (can sign in)</span></label></div></div>
+          <div class="field"><div class="label">Status</div><label class="check-row" style="padding:9px 12px"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}><span>Active (can sign in)</span></label>
+            <div class="help">Untick for someone who has left: they can't sign in and drop off every list.</div></div></div>
+        <label class="check-row"><input type="checkbox" name="on_leave" id="us-leave" ${u.leave_from ? 'checked' : ''}><span>On leave (still has an account, but is left off the dashboard, attendance, absence charges and payments)</span></label>
+        <div id="us-leave-f" class="form-row" style="${u.leave_from ? '' : 'display:none'}">
+          <div class="field"><label for="us-lf">From</label><input type="date" id="us-lf" name="leave_from" value="${esc(u.leave_from || App.cfg.today)}"></div>
+          <div class="field" data-field="leave_to"><label for="us-lt">Back on</label><input type="date" id="us-lt" name="leave_to" value="${esc(u.leave_to || '')}"><div class="help">The last day of leave. Leave blank if not known.</div></div>
+          <div class="field"><label for="us-ln">Note</label><input id="us-ln" name="leave_note" maxlength="200" value="${esc(u.leave_note || '')}" placeholder="e.g. Annual leave"></div></div>
         <div class="field"><label for="us-pw">${isNew ? 'Starting password' : 'Set a new password'} ${isNew ? '<span class="req">*</span>' : ''}</label>
           <div style="display:flex;gap:8px"><input type="text" id="us-pw" name="password" placeholder="${isNew ? 'At least 8 characters' : 'Leave blank to keep the current one'}" autocomplete="new-password">
           <button type="button" class="btn" id="us-gen" title="Generate"><i class="ti ti-wand"></i></button></div>
@@ -206,6 +212,7 @@
       </form>`, `<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="us-save">${isNew ? 'Create account' : 'Save'}</button>`);
     const form = $('#us-form', el);
     $('#us-gen', el).addEventListener('click', () => { form.password.value = genPass(); });
+    $('#us-leave', el).addEventListener('change', (e) => { $('#us-leave-f', el).style.display = e.target.checked ? '' : 'none'; });
     $('#us-save', el).addEventListener('click', async (ev) => {
       const d = App.formData(form);
       if (!isNew) d.id = u.id;
@@ -239,7 +246,7 @@
             <td class="hide-sm">${esc(u.email)}</td><td class="hide-sm">${esc(u.phone)}</td><td>${esc(u.location)}</td>
             ${'balance' in u ? `<td class="r num ${u.balance < 0 ? 'bad' : ''}">${money(u.balance)}</td>` : ''}
             <td class="hide-sm">${u.last_report ? esc(fmtDate(u.last_report)) : '<span class="faint">—</span>'}</td>
-            <td>${u.role !== 'staff' ? `<span class="pill ${u.role === 'admin' ? 'brand' : 'info'}">${esc(App.roleLabel(u.role))}</span>` : ''} ${u.suspended_until ? `<span class="pill bad">Suspended until ${esc(fmtDate(u.suspended_until, false))}</span> ` : ''}${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
+            <td>${u.role !== 'staff' ? `<span class="pill ${u.role === 'admin' ? 'brand' : 'info'}">${esc(App.roleLabel(u.role))}</span>` : ''} ${u.suspended_until ? `<span class="pill bad">Suspended until ${esc(fmtDate(u.suspended_until, false))}</span> ` : ''}${u.active && u.on_leave ? `<span class="pill out" title="${esc(u.leave_note || '')}">On leave${u.leave_to ? ' until ' + esc(fmtDate(u.leave_to, false)) : ''}</span> ` : ''}${!u.active ? '<span class="pill">Inactive</span>' : !u.has_password ? '<span class="pill out">No password</span>' : u.last_login ? `<span class="faint small">${esc(ago(u.last_login))}</span>` : '<span class="pill info">Never signed in</span>'}</td>
             <td style="white-space:nowrap">${App.isAdmin() || !['admin', 'manager'].includes(u.role) ? '<button class="btn sm ghost" data-edit-u aria-label="Account and password" title="Account &amp; password"><i class="ti ti-key"></i></button>' : ''}<i class="ti ti-chevron-right faint"></i></td></tr>`).join('')}</tbody></table></div></div>`;
       $('#st-add', ctx.el).addEventListener('click', () => editUser(null, load));
       $$('[data-u]', ctx.el).forEach((r) => r.addEventListener('click', (e) => {

@@ -583,7 +583,7 @@
       ${kpi('Hours worked', x.hours, `${x.avg_hours}h a day on average`, 'hourglass', 'tone-info')}</div>`;
   }
 
-  const DAY_STATUS = { present: ['On time', 'in'], extra: ['Day off worked', 'in'], late: ['Late', 'out'], missed: ['No clock-out', 'bad'], absent: ['Absent', 'bad'], suspended: ['Suspended', 'bad'], off: ['Day off', ''], future: ['', ''], before_start: ['Not started', ''] };
+  const DAY_STATUS = { present: ['On time', 'in'], extra: ['Day off worked', 'in'], late: ['Late', 'out'], missed: ['No clock-out', 'bad'], absent: ['Absent', 'bad'], suspended: ['Suspended', 'bad'], leave: ['On leave', ''], off: ['Day off', ''], future: ['', ''], before_start: ['Not started', ''] };
   function calendarHtml(days) {
     if (!days.length) return '';
     const lead = (Number(new Date(days[0].date + 'T00:00:00').getDay()) + 6) % 7; // Monday first
@@ -591,11 +591,11 @@
       const [label] = DAY_STATUS[d.status] || ['', ''];
       const tip = [fmtDate(d.date), label, d.in ? `${timeOf(d.in)} – ${d.out ? timeOf(d.out) : '?'}` : '', d.late ? `${d.late_min} min late` : '', d.in_reason, d.out_reason].filter(Boolean).join('\n');
       return `<div class="cal-cell st-${d.status}" title="${esc(tip)}"><div class="cal-d">${+d.date.slice(8)}</div>
-        ${d.in ? `<div class="cal-t">${esc(timeOf(d.in))}</div>` : d.status === 'absent' ? '<div class="cal-t">Absent</div>' : d.status === 'suspended' ? '<div class="cal-t">Susp.</div>' : ''}
+        ${d.in ? `<div class="cal-t">${esc(timeOf(d.in))}</div>` : d.status === 'absent' ? '<div class="cal-t">Absent</div>' : d.status === 'suspended' ? '<div class="cal-t">Susp.</div>' : d.status === 'leave' ? '<div class="cal-t">Leave</div>' : ''}
         ${d.late ? `<div class="cal-t">+${d.late_min}m</div>` : ''}${d.status === 'missed' ? '<div class="cal-t">No out</div>' : d.early ? '<div class="cal-t">Early</div>' : ''}</div>`;
     }));
     return `<div class="cal-head">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div>${d}</div>`).join('')}</div><div class="cal">${cells.join('')}</div>
-      <div class="chips" style="margin-top:10px">${['present', 'late', 'missed', 'absent', 'suspended', 'extra', 'off'].filter((s) => s !== 'suspended' || days.some((d) => d.status === s)).map((s) => `<span class="cal-key st-${s}">${DAY_STATUS[s][0]}</span>`).join('')}</div>`;
+      <div class="chips" style="margin-top:10px">${['present', 'late', 'missed', 'absent', 'suspended', 'leave', 'extra', 'off'].filter((s) => !['suspended', 'leave'].includes(s) || days.some((d) => d.status === s)).map((s) => `<span class="cal-key st-${s}">${DAY_STATUS[s][0]}</span>`).join('')}</div>`;
   }
   App.attendanceCalendar = calendarHtml;
 

@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $public = ['session', 'login', 'reminder_act'];
-$getAllowed = ['session', 'pulse', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
+$getAllowed = ['session', 'pulse', 'statement_ack_pending', 'statement_acks', 'home', 'notifications', 'reports_list', 'report_get', 'issues', 'wallet', 'txn_get',
     'ledger', 'balances', 'requests_list', 'dashboard', 'users_list', 'settings_get', 'reports_export', 'ledger_export',
     'jobs_list', 'job_get', 'jobs_export', 'jobs_due', 'staff_profile', 'tools_list', 'tools_export', 'tool_get', 'attendance_today', 'attendance_list', 'attendance_export',
     'attendance_report', 'attendance_report_export', 'clients_list', 'client_get', 'payroll_list', 'payroll_detail', 'payroll_export',
@@ -120,6 +120,7 @@ function public_config(array $me): array
         'lesson_outcomes' => LESSON_OUTCOMES,
         'work_days'     => work_days(),
         'suspension'    => active_suspension($me['id']),
+        'statement_ack_pending' => (bool)statement_ack_pending_row($me['id']),
     ] + (is_admin($me) ? [
         'company_categories' => company_categories(),
         'project_categories' => project_categories(),
@@ -217,6 +218,7 @@ function act_pulse(array $in, array $me): void
         'notices' => notice_badge($me),
         'ideas'   => idea_badge($me),
         'due_reminders' => due_reminders_for($me['id']),
+        'statement_ack_pending' => (bool)statement_ack_pending_row($me['id']),
     ] + job_badges($me);
     if (can_review_money($me)) {
         $out['pending_reviews'] = (int)q("SELECT COUNT(*) FROM wallet_txns WHERE kind='debit' AND status='posted'")->fetchColumn();

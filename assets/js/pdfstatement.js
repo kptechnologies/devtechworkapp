@@ -293,6 +293,12 @@
     if (lh.signatory) doc.text(`${lh.signatory}${lh.signatory_title ? ' | ' + lh.signatory_title : ''}`, M, y + 4.3);
     if (contact) doc.text(contact, M, y + 8.6);
     // Staff acknowledgement line on the right.
+    if (s.ack?.signature) {
+      try { doc.addImage(s.ack.signature, 'PNG', W - M - 62, y - 9, 40, 14); } catch (e) { /* unreadable image: leave the line blank */ }
+      doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(...GREY)
+        .text(`Signed by ${s.ack.signed_name} on ${fmtDate(s.ack.signed_at)}`, W - M - 62, y + 14);
+      doc.setFontSize(8.5);
+    }
     doc.setDrawColor(...GREY).setLineWidth(0.2).line(W - M - 62, y + 6, W - M, y + 6);
     doc.text('Staff signature & date', W - M - 62, y + 10);
 
@@ -321,7 +327,7 @@
 
     const safe = (t) => t.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-');
     const name = `Statement-of-Account-${safe(u.name)}-${s.from === s.to ? s.from : s.from + '-to-' + s.to}.pdf`;
-    return { doc, blob: doc.output('blob'), name, period };
+    return { doc, blob: doc.output('blob'), name, period, key: s.from === s.to ? s.from : `${s.from}_${s.to}` };
   }
 
   function download(blob, name) {
@@ -334,9 +340,10 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 
-  async function sendPdf(uid, pdf, note) {
+  async function sendPdf(uid, pdf, note, requireAck = true) {
     const file = new File([pdf.blob], pdf.name, { type: 'application/pdf' });
-    return api('staff_statement_send', { data: { user_id: uid, period: pdf.period, note }, files: [{ field: 'files[]', file, name: pdf.name }] });
+    return api('staff_statement_send', { data: { user_id: uid, period: pdf.period, period_key: pdf.key, require_ack: requireAck ? 1 : 0, note },
+      files: [{ field: 'files[]', file, name: pdf.name }] });
   }
 
   App.statementPdf = { build: buildPdf, download, send: sendPdf, periodLabel };
@@ -356,6 +363,7 @@
         <div class="field"><label for="sd-from">From</label><input type="month" id="sd-from" name="from" value="${m}" max="${App.cfg.today.slice(0, 7)}"></div>
         <div class="field"><label for="sd-to">To</label><input type="month" id="sd-to" name="to" value="${m}" max="${App.cfg.today.slice(0, 7)}"></div></div>
         <div class="field"><label for="sd-note">Message to the staff member (optional, when sending)</label><input id="sd-note" name="note" maxlength="500" placeholder="e.g. Please review and sign by Friday"></div>
+        <label class="check-row"><input type="checkbox" id="sd-ack" checked><span><b>Require signature</b><br><span class="muted small">They must sign and acknowledge it before they can use the portal.</span></span></label>
         <p class="faint small">PDF on the company letterhead with logo and watermark: earnings, every deduction with its reason, advances and net pay. Up to 12 months.</p></form>
       <h3 style="margin:14px 0 6px">Already sent</h3><div class="card" id="sd-sent">${App.loading()}</div>`,
     `<button class="btn" id="sd-view"><i class="ti ti-eye"></i>Preview</button><button class="btn" id="sd-dl"><i class="ti ti-download"></i>Download PDF</button>
@@ -382,7 +390,7 @@
       try {
         await App.busy(e.currentTarget, async () => {
           const pdf = await make();
-          await sendPdf(uid, pdf, App.formData(form).note || '');
+          await sendPdf(uid, pdf, App.formData(form).note || '', $('#sd-ack', el).checked);
           const s = await api('staff_statement', { query: { user_id: uid, from: last.from, to: last.to } });
           $('#sd-sent', el).innerHTML = sentList(s.sent);
         });
@@ -394,7 +402,7 @@
   /** Admin: send this month's statement to every staff member on the payroll. */
   App.statementSendAll = async (rows, month) => {
     if (!rows.length) return;
-    if (!(await App.confirm('Send statements', `Make a ${esc(monthName(month))} statement of account PDF for ${rows.length} staff member${rows.length === 1 ? '' : 's'} and send each one to them? They get a phone alert and find it under My deductions.`, { ok: 'Send all' }))) return;
+    if (!(await App.confirm('Send statements', `Make a ${esc(monthName(month))} statement of account PDF for ${rows.length} staff member${rows.length === 1 ? '' : 's'} and send each one to them? They get a phone alert and email, and must <b>sign and acknowledge</b> it before they can continue in the portal.`, { ok: 'Send all' }))) return;
     const el = App.modal('Sending statements', `<div id="ss-prog" class="muted">Starting…</div>`, '');
     let done = 0;
     const failed = [];
@@ -407,8 +415,24 @@
       } catch (e) { failed.push(`${r.name}: ${e.message}`); }
     }
     $('#ss-prog', el).innerHTML = `<p><b>${done}</b> statement${done === 1 ? '' : 's'} sent.</p>${failed.length ? `<p class="bad small">${failed.map(esc).join('<br>')}</p>` : ''}`;
-    $('#ss-prog', el).insertAdjacentHTML('beforeend', '<div class="actions" style="margin-top:12px"><button class="btn primary" id="ss-done">Done</button></div>');
+    $('#ss-prog', el).insertAdjacentHTML('beforeend', '<div class="actions" style="margin-top:12px"><button class="btn" id="ss-signs"><i class="ti ti-signature"></i>Sign-offs</button><button class="btn primary" id="ss-done">Done</button></div>');
     $('#ss-done', el).addEventListener('click', App.closeTop);
+    $('#ss-signs', el).addEventListener('click', () => { App.closeTop(); App.statementSignoffs(month); });
+  };
+
+  /** Admin: who has signed this month's statement and who has not. */
+  App.statementSignoffs = async (month) => {
+    const el = App.modal(`Statement sign-offs · ${esc(monthName(month))}`, `<div id="so-body">${App.loading()}</div>`, '<button class="btn" data-close>Close</button>', { wide: true });
+    try {
+      const r = await api('statement_acks', { query: { period: month } });
+      const signed = r.rows.filter((x) => x.signed_at).length;
+      $('#so-body', el).innerHTML = r.rows.length ? `<p class="muted" style="margin-bottom:10px"><b>${signed}</b> of ${r.rows.length} signed.</p>
+        <div class="card"><ul class="list">${r.rows.map((x) => `<li class="li" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <span><b>${esc(x.name)}</b><div class="faint small">${x.signed_at ? `Signed ${esc(fmtDate(x.signed_at))} as “${esc(x.signed_name)}”` : `Sent ${esc(fmtDate(x.requested_at))} · <span class="bad">not signed yet</span>`}</div></span>
+          <span style="display:flex;gap:8px;align-items:center">${x.signature ? `<img src="${esc(x.signature)}" alt="Signature of ${esc(x.name)}" style="height:38px;max-width:120px;background:#fff;border-radius:6px;border:1px solid var(--line, #ddd)">` : ''}
+          ${x.file_id ? `<a class="btn sm" href="file.php?id=${x.file_id}" target="_blank" rel="noopener"><i class="ti ti-file-type-pdf"></i>PDF</a>` : ''}</span></li>`).join('')}</ul></div>`
+        : '<p class="muted">No statements needing a signature have been sent for this month.</p>';
+    } catch (e) { $('#so-body', el).innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
   };
 
   /** Staff: statements sent by the office, plus a PDF of their own published months. */

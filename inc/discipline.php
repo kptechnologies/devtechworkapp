@@ -192,7 +192,7 @@ function overdue_items_for(int $uid): array
 function charge_overdue_items(): int
 {
     $n = 0;
-    $staff = q("SELECT id FROM users WHERE active = 1 AND role IN ('" . implode("','", EMPLOYEE_ROLES) . "')")->fetchAll(PDO::FETCH_COLUMN);
+    $staff = q("SELECT id FROM users WHERE active = 1 AND " . not_on_leave_sql() . " AND role IN ('" . implode("','", EMPLOYEE_ROLES) . "')")->fetchAll(PDO::FETCH_COLUMN);
     foreach ($staff as $uid) {
         foreach (overdue_items_for((int)$uid) as $x) {
             $what = $x['kind'] === 'task' ? "Task \"{$x['title']}\" on {$x['ref']}" : "{$x['ref']} {$x['title']}";

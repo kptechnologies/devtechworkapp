@@ -347,7 +347,7 @@
   /* -------------------------------------------------- admin: send payment */
   App.route('pay', async (ctx) => {
     const preselect = new URLSearchParams(location.hash.split('?')[1] || '').get('to');
-    const staff = (await api('balances')).items.filter((s) => +s.active === 1);
+    const staff = (await api('balances')).items.filter((s) => +s.active === 1 && !s.on_leave);
     ctx.el.innerHTML = `
       <div class="page-head"><div><h1>Send payment</h1><p class="muted">Daily allowance, work budget or top-up. Each person gets a notification and an email.</p></div>
         <div class="actions"><button class="btn" id="py-adjust"><i class="ti ti-adjustments"></i>Adjust a balance</button></div></div>
