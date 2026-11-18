@@ -2,7 +2,7 @@
 /** Database tables (MySQL 5.7+ / MariaDB 10.3+). Safe to run repeatedly. */
 
 /** Bump when table_sql() or column_sql() changes; ensure_schema() then upgrades existing installs. */
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 30;
 function table_sql(): array
 {
     $t = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -940,6 +940,10 @@ function column_sql(): array
         ['work_docs', 'access', "VARCHAR(8) NOT NULL DEFAULT 'job'"],
         // v28: what this staff member may see of their deductions and weekly report (JSON); NULL = the company setting
         ['users', 'portal_visibility', 'TEXT NULL'],
+        // v30: staff on leave (leave_to NULL = until further notice) are left off the dashboard, attendance and payment lists
+        ['users', 'leave_from', 'DATE NULL'],
+        ['users', 'leave_to', 'DATE NULL'],
+        ['users', 'leave_note', "VARCHAR(200) NOT NULL DEFAULT ''"],
     ];
 }
 

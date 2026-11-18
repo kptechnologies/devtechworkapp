@@ -295,6 +295,20 @@ function str_in($v, int $max = 2000): string
     return mb_substr($s, 0, $max);
 }
 
+/** SQL condition: the user (table alias $a) is not on leave on $date (default today). */
+function not_on_leave_sql(string $a = '', ?string $date = null): string
+{
+    $p = $a === '' ? '' : $a . '.';
+    $d = db()->quote($date ?? today());
+    return "NOT ({$p}leave_from IS NOT NULL AND {$p}leave_from <= $d AND ({$p}leave_to IS NULL OR {$p}leave_to >= $d))";
+}
+
+/** Whether a user row (with leave_from/leave_to) is on leave on $date. */
+function on_leave_on(array $u, string $date): bool
+{
+    return !empty($u['leave_from']) && $u['leave_from'] <= $date && (empty($u['leave_to']) || $u['leave_to'] >= $date);
+}
+
 /** Upgrade the database after new code is uploaded: runs once per SCHEMA_VERSION bump. */
 function ensure_schema(): void
 {

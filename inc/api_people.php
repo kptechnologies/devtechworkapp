@@ -909,7 +909,7 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
         $w = 'u.id = ?';
         $p[] = $uid;
     }
-    $staff = q("SELECT u.id, u.name, u.location, u.start_date, DATE(u.created_at) AS joined FROM users u WHERE $w ORDER BY u.name", $p)->fetchAll();
+    $staff = q("SELECT u.id, u.name, u.location, u.start_date, u.leave_from, u.leave_to, DATE(u.created_at) AS joined FROM users u WHERE $w ORDER BY u.name", $p)->fetchAll();
     $byUser = [];
     $ids = array_map('intval', array_column($staff, 'id'));
     $suspended = suspension_ranges($ids, $from, $to);
@@ -926,7 +926,7 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
     foreach ($staff as $s) {
         $sid = (int)$s['id'];
         $since = max($s['start_date'] ?: $s['joined'], $launch);
-        $st = ['working_days' => 0, 'present' => 0, 'extra_days' => 0, 'absent' => 0, 'suspended' => 0, 'late' => 0, 'late_min' => 0, 'early' => 0,
+        $st = ['working_days' => 0, 'present' => 0, 'extra_days' => 0, 'absent' => 0, 'suspended' => 0, 'leave' => 0, 'late' => 0, 'late_min' => 0, 'early' => 0,
             'missed_out' => 0, 'minutes' => 0, 'arrivals' => []];
         foreach ($dates as $date) {
             $isWork = in_array((int)date('N', strtotime($date)), $workDays, true);
@@ -961,13 +961,17 @@ function attendance_report(string $from, string $to, ?int $uid = null): array
                 // A suspension is served, not missed: it doesn't count against attendance.
                 $day['status'] = 'suspended';
                 $st['suspended'] += $date <= $end ? 1 : 0;
+            } elseif ($isWork && on_leave_on($s, $date)) {
+                // Leave isn't an absence either.
+                $day['status'] = 'leave';
+                $st['leave'] += $date <= $end ? 1 : 0;
             } elseif ($isWork && $date <= $end && $date >= $since) {
                 $st['absent']++;
                 $day['status'] = 'absent';
             } elseif ($isWork) {
                 $day['status'] = $date > $end ? 'future' : 'before_start';
             }
-            if ($isWork && $date <= $end && $date >= $since && $day['status'] !== 'suspended') {
+            if ($isWork && $date <= $end && $date >= $since && !in_array($day['status'], ['suspended', 'leave'], true)) {
                 $st['working_days']++;
             }
             if ($uid) {
@@ -1066,7 +1070,7 @@ function act_attendance_list(array $in, array $me): void
     $absent = [];
     if (is_management($me) && $from === $to && empty($in['user_id'])) {
         $present = array_unique(array_column($rows, 'user_id'));
-        $absent = array_values(array_filter(q("SELECT id, name, location FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') ORDER BY name")->fetchAll(),
+        $absent = array_values(array_filter(q("SELECT id, name, location FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') AND " . not_on_leave_sql('', $from) . ' ORDER BY name')->fetchAll(),
             fn($u) => !in_array((int)$u['id'], array_map('intval', $present), true)));
         $susp = suspension_ranges(array_column($absent, 'id'), $from, $from);
         foreach ($absent as &$a) {
@@ -1181,7 +1185,7 @@ function attendance_today_summary(): array
     foreach ($rows as $r) {
         $first[$r['user_id']] = $first[$r['user_id']] ?? $r;
     }
-    $staff = q("SELECT id, name FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') ORDER BY name")->fetchAll();
+    $staff = q("SELECT id, name FROM users WHERE active = 1 AND role IN ('staff','supervisor','subadmin','manager') AND " . not_on_leave_sql() . ' ORDER BY name')->fetchAll();
     $missing = array_values(array_filter($staff, fn($s) => !isset($first[$s['id']])));
     return [
         'in' => count($first),
