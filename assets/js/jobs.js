@@ -343,13 +343,17 @@
 
   /** Ask an admin for more time on a job or task that is due. item: {job_id, task_id?, ref, title}. */
   App.requestExtension = (item, done) => {
-    const tomorrow = App.addDays ? App.addDays(App.cfg.today, 1) : '';
+    // Staff can carry work over by one day at most: the day after it was due (or after today if already overdue).
+    const base = item.due_date && item.due_date > App.cfg.today ? item.due_date : App.cfg.today;
+    const nd = new Date(base + 'T12:00:00'); nd.setDate(nd.getDate() + 1);
+    const tomorrow = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`;
     const el = App.modal(`More time for ${esc(item.ref)}`, `<form id="jx2-form" novalidate>
       <p class="muted" style="margin-bottom:12px"><b>${esc(item.title)}</b><br>Work isn't carried to another day without an admin's approval.
         You can't end your day until they answer.</p>
       <div class="field"><label for="jx2-r">Why isn't it finished? <span class="req">*</span></label>
         <textarea id="jx2-r" name="reason" rows="3" placeholder="e.g. The school's power was off from 11am; 2 of 4 projectors are mounted"></textarea></div>
-      <div class="form-row"><div class="field"><label for="jx2-d">Finish by <span class="req">*</span></label><input type="date" id="jx2-d" name="new_due_date" min="${esc(App.cfg.today)}" value="${esc(tomorrow)}"></div>
+      <div class="form-row"><div class="field"><label for="jx2-d">Finish by <span class="req">*</span></label><input type="date" id="jx2-d" name="new_due_date" min="${esc(App.cfg.today)}" max="${esc(tomorrow)}" value="${esc(tomorrow)}">
+        <div class="faint small">Up to 1 extra day.</div></div>
         <div class="field"><label for="jx2-t">Time</label><input type="time" id="jx2-t" name="new_due_time"></div></div></form>`,
     '<button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="jx2-ok"><i class="ti ti-send"></i>Ask admin</button>');
     $('#jx2-ok', el).addEventListener('click', async (e) => {
@@ -358,6 +362,7 @@
       const errs = {};
       if (!d.reason.trim()) errs.reason = 'Say why it isn\'t finished.';
       if (!d.new_due_date) errs.new_due_date = 'Choose when it will be finished.';
+      else if (d.new_due_date > tomorrow) errs.new_due_date = `You can only ask for up to 1 extra day (until ${App.dueLabel(tomorrow)}).`;
       if (Object.keys(errs).length) { App.showErrors(form, errs); return; }
       try {
         await App.busy(e.currentTarget, () => api('job_extend', { data: { id: item.job_id, task_id: item.task_id || 0, ...d } }));
@@ -487,7 +492,7 @@
           if (!(await App.confirm('Delete this task?', esc(t.title), { ok: 'Delete', danger: true }))) return;
           try { await App.busy(e.currentTarget, () => api('job_task_delete', { data: { task_id: t.id } })); toast('Task deleted'); App.current?.refresh?.(); render(); } catch (err) { App.fail(err); }
         });
-        $('[data-extend]', row)?.addEventListener('click', () => App.requestExtension({ job_id: j.id, task_id: t.id, ref: j.ref, title: t.title }, render));
+        $('[data-extend]', row)?.addEventListener('click', () => App.requestExtension({ job_id: j.id, task_id: t.id, ref: j.ref, title: t.title, due_date: t.due_date }, render));
       });
 
       let foot = $('.drawer-foot', el);
@@ -519,7 +524,7 @@
     const act = async (btn, a, j) => {
       if (a === 'edit') { editJob(j, null, render); return; }
       if (a === 'accept') { assignJob(j, render); return; }
-      if (a === 'extend') { App.requestExtension({ job_id: j.id, ref: j.ref, title: j.title }, render); return; }
+      if (a === 'extend') { App.requestExtension({ job_id: j.id, ref: j.ref, title: j.title, due_date: j.due_date }, render); return; }
       if (a === 'complete') {
         const open = (j.tasks || []).filter((t) => t.status === 'open').length;
         if (open && !(await App.confirm(`${open} task${open === 1 ? ' is' : 's are'} still open`, 'Tick off the finished tasks first. Complete the whole job anyway?', { ok: 'Complete anyway' }))) return;
