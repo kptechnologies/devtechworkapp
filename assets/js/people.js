@@ -168,7 +168,7 @@
       $$('[data-due]', box).forEach((row) => {
         const x = dueItems.find((d) => d.key === row.dataset.due);
         $('[data-due-open]', row)?.addEventListener('click', () => App.openJob(x.job_id));
-        $('[data-due-more]', row)?.addEventListener('click', () => App.requestExtension({ job_id: x.job_id, task_id: x.kind === 'task' ? x.id : 0, ref: x.ref, title: x.title }, refreshDue));
+        $('[data-due-more]', row)?.addEventListener('click', () => App.requestExtension({ job_id: x.job_id, task_id: x.kind === 'task' ? x.id : 0, ref: x.ref, title: x.title, due_date: x.due_date }, refreshDue));
         $('[data-ext-proceed]', row)?.addEventListener('click', (e) => App.proceedExtension(e.currentTarget, +e.currentTarget.dataset.extProceed, refreshDue));
       });
       $('[data-due-refresh]', box)?.addEventListener('click', (e) => { e.preventDefault(); refreshDue(); });

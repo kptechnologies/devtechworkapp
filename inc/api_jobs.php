@@ -1061,6 +1061,13 @@ function act_job_extend(array $in, array $me): void
     }
     if (!$date || $date < today() || ($date === today() && (!$time || strtotime("$date $time") <= time()))) {
         $errors['new_due_date'] = 'Choose a new date (and time) later than now.';
+    } else {
+        // Staff may carry work over by one day at most: the day after it was due (or after today, if it is already overdue).
+        $base = ($task ? $task['due_date'] : $job['due_date']) ?: today();
+        $limit = date('Y-m-d', strtotime(max($base, today()) . ' +1 day'));
+        if ($date > $limit) {
+            $errors['new_due_date'] = 'You can only ask for up to 1 extra day (until ' . due_label($limit, null) . ').';
+        }
     }
     if ($errors) {
         json_out(['ok' => false, 'error' => 'Check the highlighted fields.', 'fields' => $errors], 422);
